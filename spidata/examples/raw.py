@@ -1,5 +1,5 @@
-from spidata.spidata.data.registery import Registery
-from spidata.spidata.data.tools import XML_to_TXT
+from spidata.data.registery import Registery
+from spidata.data.tools import XML_to_TXT
 import logging
 import pandas as pd
 import cv2

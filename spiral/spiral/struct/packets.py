@@ -8,7 +8,8 @@ class OdObject:
     
     def __init__(self,
         id_:int,
-        cls:int,
+        cls_:int,
+        conf:float,
         landing_status:int,
         motion_status:int,
         top_left_x:int,# piksel         
@@ -17,7 +18,8 @@ class OdObject:
         bottom_right_y:int,# piksel
         ):
         self.id_ = id_
-        self.cls = cls
+        self.cls_ = cls_
+        self.conf = conf
         self.landing_status = landing_status
         self.motion_status = motion_status
         self.top_left_x = top_left_x            
@@ -29,35 +31,45 @@ class OdObject:
         valid_cls = [0,1,2,3]
         valid_landing_status = [-1,0,1]
         valid_motion_status = [-1,0,1]
-        if not self.cls in valid_cls:
-            logging.warning(f"CheckWarn: Obje classı geçersiz değerde: {self.cls} {type(self.cls)}, Bunlardan biri olmalı: {valid_cls} ")
+        if not self.cls_ in valid_cls:
+            logging.warning(f"CheckWarn: Obje classı geçersiz değerde: {self.cls_} {type(self.cls_)}, Bunlardan biri olmalı: {valid_cls} ")
         if not self.landing_status in valid_landing_status:
             logging.warning(f"CheckWarn: Obje landing statusu geçersiz değerde: {self.landing_status} {type(self.landing_status)}, Bunlardan biri olmalı: {valid_landing_status} ")
         if not self.motion_status in valid_motion_status:
             logging.warning(f"CheckWarn: Obje motion statusu geçersiz değerde: {self.motion_status} {type(self.motion_status)}, Bunlardan biri olmalı: {valid_motion_status} ")
 
         # class türüne göre checkler
-        if self.cls == 0:
+        if self.cls_ == 0:
             if not self.landing_status == -1:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
             if not self.motion_status in [0,1]:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
-        elif self.cls == 1:
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
+        elif self.cls_ == 1:
             if not self.landing_status == -1:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
             if not self.motion_status  == -1:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
-        elif self.cls == 2 or self.cls == 3:
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
+        elif self.cls_ == 2 or self.cls_ == 3:
             if not self.landing_status in [0,1]:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'landing_status' için bu değeri alamaz: {self.landing_status}")
             if not self.motion_status == -1:
-                logging.warning(f"CheckWarn: {self.cls} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
+                logging.warning(f"CheckWarn: {self.cls_} class öğesi 'motion_status' için bu değeri alamaz: {self.motion_status}")
              
     def __str__(self):
-        return (f"OdObject(id_={self.id_}, cls={self.cls}, "
+        return (f"OdObject(id_={self.id_}, cls={self.cls_}, "
                 f"landing_status={self.landing_status}, motion_status={self.motion_status}, "
                 f"top_left=({self.top_left_x}, {self.top_left_y}), "
                 f"bottom_right=({self.bottom_right_x}, {self.bottom_right_y}))")
+    
+    @classmethod
+    def from_xy1xy2_norm(cls, id_, cls_, conf, x1,y1,x2,y2, ls, ms, image_wh):
+        W,H = image_wh
+        abs_x1 = int(W * x1)
+        abs_x2 = int(W * x2)
+        abs_y1 = int(H * y1)
+        abs_y2 = int(H * y2)
+        obj = cls(id_, cls_, conf, ls, ms, abs_x1, abs_y1, abs_x2, abs_y2)
+        return obj
     
 @beartype
 class TranslationObject:
@@ -105,12 +117,12 @@ class SourcePacket:
         gps_translation_x:float = None, # metre
         gps_translation_y:float = None, # metre        
         gps_translation_z:float = None, # metre         
-        search_image:np.ndarray = None
+        search_image:np.ndarray | None = None
         ):
         # inputs
         self.id_ = id_
         self.original_image = original_image
-        self.original_shape = original_image.shape
+        self.original_shape_HWC = original_image.shape
         self.gps_health_status = gps_health_status
         self.gps_translation_x = gps_translation_x 
         self.gps_translation_y = gps_translation_y
@@ -119,7 +131,7 @@ class SourcePacket:
 
     def __str__(self):
         return (f"SourcePacket(id_={self.id_}, "
-                f"original_shape={self.original_shape}, "
+                f"original_shape={self.original_shape_HWC}, "
                 f"gps_health_status={self.gps_health_status}, "
                 f"gps_translation=({self.gps_translation_x}, {self.gps_translation_y}, {self.gps_translation_z}), "
                 f"search_image={'None' if self.search_image is None else 'set'})")
@@ -131,7 +143,7 @@ class Result:
         packet: SourcePacket,
         od_objects: list[OdObject],
         translation_object: TranslationObject,
-        search_object: SearchObject = None
+        search_object: SearchObject | None= None
         ):
         self.packet = packet
         self.od_objects = od_objects
@@ -150,7 +162,7 @@ class Result:
             obj.check_attribute_values()
         
         # check object position overflows
-        h,w = self.packet.original_shape[:2]
+        h,w = self.packet.original_shape_HWC[:2]
         
         for obj in self.od_objects:
             if not check_obj_overflow(h,w,
