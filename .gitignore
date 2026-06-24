@@ -4,4 +4,8 @@
 *.webp
 *.pt
 *.path
+*.txt
+*.json
+*.opencode
 __pycache__
+.opencode
