@@ -1,0 +1,7 @@
+*.xml
+*.csv
+*.webm
+*.webp
+*.pt
+*.path
+__pycache__
