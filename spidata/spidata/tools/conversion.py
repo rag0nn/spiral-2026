@@ -1,5 +1,4 @@
 from pathlib import Path
-import logging
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
 
@@ -15,6 +14,7 @@ def XML_to_TXT(path, dst_folder_path):
         "UAP" : 2,
         "uai": 3,
         "UAI" : 3,
+        "UAİ" : 3,
     }
     dst = Path(dst_folder_path)
     dst.mkdir(parents=True, exist_ok=True)

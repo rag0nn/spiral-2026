@@ -18,7 +18,7 @@ class DataPack:
             
     def create_txt_folder_from_xml(self):
         if self.txt_labels_path is None:
-            self.txt_labels_path = txt_labels_path = self.frames_path.parent / "txt_labels"
+            self.txt_labels_path = self.frames_path.parent / "txt_labels"
             self.txt_labels_path.mkdir(exist_ok=True)
             XML_to_TXT(self.xml_labels_path,self.txt_labels_path)
             logging.info("Labels folder oluşturuldu.")

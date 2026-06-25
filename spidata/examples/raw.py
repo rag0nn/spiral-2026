@@ -2,51 +2,48 @@ from spidata.data.registery import Registery
 import logging
 import pandas as pd
 import cv2
-from spiral.utils import setup_logging
 
-setup_logging()
-
-data_pack =  Registery.ot1
+data_pack =  Registery.ot25_4
 
 def general_show():
     cnt = 0
-    logging.info("Images")
+    print("Images")
     for pth in data_pack.frames_path.iterdir():
         cnt+=1
-        logging.info(f"{cnt} {pth}")
+        print(f"{cnt} {pth}")
         if cnt ==4: break
         
     cnt = 0
-    logging.info("XMLS")
+    print("XMLS")
     for pth in data_pack.xml_labels_path.iterdir():
         cnt+=1
-        logging.info(f"{cnt} {pth}")
+        print(f"{cnt} {pth}")
         if cnt ==4: 
             break
         
-    logging.info("Translations")
+    print("Translations")
     trans_df = pd.read_csv(data_pack.translations_path)
-    logging.info(trans_df.head())
+    print(trans_df.head())
 
-    logging.info("Txts")
+    print("Txts")
     cnt = 0
     if data_pack.txt_labels_path is not None:
         for pth in data_pack.txt_labels_path.iterdir():
             cnt+=1
-            logging.info(f"{cnt} {pth}")
+            print(f"{cnt} {pth}")
             if cnt ==4: break
     else:
-        logging.info("txt labels yok")
+        print("txt labels yok")
         
-    logging.info("Test webm Image import")
+    print("Test webm Image import")
     for pth in data_pack.frames_path.iterdir():
         image = cv2.imread(pth)
         if image is not None:
-            logging.info(f"{pth} image başarıyla okundu: {image.shape}")
+            print(f"{pth} image başarıyla okundu: {image.shape}")
         break
 
 def generate_labels():
     data_pack.create_txt_folder_from_xml()
 
+generate_labels()
 general_show()
-# generate_labels()
