@@ -1,20 +1,7 @@
-from dataclasses import dataclass
 from pathlib import Path
 import logging
 import xml.etree.ElementTree as ET
-
-@dataclass
-class DataPack:
-    frames_path:Path
-    xml_labels_path:Path
-    translations_path:Path
-    txt_labels_path: Path | None = None
-    
-    def create_txt_folder(self):
-        self.txt_labels_path = self.frames_path.parent / "txt_labels"
-        self.txt_labels_path.mkdir(exist_ok=True)
-        logging.info("Labels folder oluşturuldu.")
-        
+from tqdm import tqdm
 
 def XML_to_TXT(path, dst_folder_path):
     CLASS_MAP = {
@@ -35,7 +22,7 @@ def XML_to_TXT(path, dst_folder_path):
     src = Path(path)
     xml_files = [src] if src.is_file() else list(src.glob("*.xml"))
 
-    for xml_path in xml_files:
+    for xml_path in tqdm(xml_files):
         tree = ET.parse(xml_path)
         root = tree.getroot()
 

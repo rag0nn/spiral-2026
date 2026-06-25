@@ -1,5 +1,4 @@
 from spidata.data.registery import Registery
-from spidata.data.tools import XML_to_TXT
 import logging
 import pandas as pd
 import cv2
@@ -47,10 +46,7 @@ def general_show():
         break
 
 def generate_labels():
-    from tqdm import tqdm
-    data_pack.create_txt_folder() 
-    dst_folder = data_pack.txt_labels_path 
-    for pth in tqdm(data_pack.xml_labels_path.iterdir()):
-        XML_to_TXT(pth, dst_folder)
-        
-generate_labels()
+    data_pack.create_txt_folder_from_xml()
+
+general_show()
+# generate_labels()
