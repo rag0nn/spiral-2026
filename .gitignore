@@ -3,9 +3,11 @@
 *.webm
 *.webp
 *.pt
+*.pth
 *.path
 *.txt
 *.json
+*.png
 *.opencode
 __pycache__
 .opencode

@@ -5,21 +5,42 @@ from torch import nn
 import torch.nn.functional as F
 
 class Backbone(nn.Module):
-    def __init__(self, c1=3, base_channels=32):
+    """
+    Erken downsampling icin ayarlanabilir stem blogu (FocusStem veya DeepStem) kullanan backbone.
+
+    512x512x3 girdi, C3K2 bloklarina girmeden once stem ile 128x128 boyutuna indirilir.
+    Bu sayede erken katmanlardaki FLOP ve bellek tuketimi onemli olcude azalir.
+
+    stem_type:
+        'focus' -> Space-to-Depth (bilgi kaybi yok, daha az FLOP)
+        'deep'  -> Ardisik 3x3 evrişimler (daha genis receptive field)
+    """
+    def __init__(self, c1=3, base_channels=32, stem_type="focus"):
         super().__init__()
         c2 = base_channels
-        self.c3 = C3K2(c1, c2)
+        # Stem: 512x512x3 -> 128x128xc2 (4x downsampling)
+        if stem_type == "focus":
+            self.stem = FocusStem(in_channels=c1, out_channels=c2, downscale=4)
+        elif stem_type == "deep":
+            self.stem = DeepStem(in_channels=c1, out_channels=c2)
+        else:
+            raise ValueError(f"Bilinmeyen stem_type: {stem_type}. 'focus' veya 'deep' kullanin.")
+
+        # C3K2 bloklari artik 128x128 uzerinde calisir (512x512 yerine)
+        self.c3 = C3K2(c2, c2)
         self.down34 = Conv(c2, c2 * 2, k=3, s=2)
         self.c4 = C3K2(c2 * 2, c2 * 2)
         self.down45 = Conv(c2 * 2, c2 * 4, k=3, s=2)
         self.c5 = C3K2(c2 * 4, c2 * 4)
 
     def forward(self, x):
-        c3 = self.c3(x)
+        # x: 512x512 -> stem -> 128x128
+        s = self.stem(x)
+        c3 = self.c3(s)
         c4 = self.c4(self.down34(c3))
         c5 = self.c5(self.down45(c4))
         return c3, c4, c5
-    
+
 class Neck(nn.Module):
     def __init__(self, ch3=32, ch4=64, ch5=128, hidden=64):
         super().__init__()
@@ -83,6 +104,12 @@ class OdHead(nn.Module):
         return outs
 
 class DetectDecoder:
+    """OdHead çıktılarını alıp skor threshold, NMS ve format dönüşümü ile
+    nihai detection listesine çeviren post-processing sınıfı.
+
+    Dönen her detection: (x1, y1, x2, y2, score, class_idx)
+    """
+
     def __init__(self, score_thresh=0.5, nms_iou=0.45, max_det=100, fmt="xyxy"):
         self.score_thresh = score_thresh
         self.nms_iou = nms_iou
@@ -91,6 +118,8 @@ class DetectDecoder:
 
     @staticmethod
     def _make_grid(H, W, device):
+        """Feature map boyutunda normalize edilmiş merkez noktaları grid'i oluşturur.
+        Her hücrenin merkezini [0,1] aralığında döndürür."""
         ys, xs = torch.meshgrid(
             torch.arange(H, device=device),
             torch.arange(W, device=device),
@@ -99,6 +128,15 @@ class DetectDecoder:
         return (xs + 0.5) / W, (ys + 0.5) / H
 
     def decode(self, od_head_outs):
+        """OdHead'ten gelen (cls, reg, ctr) üçlülerini bounding box'lara çevirir.
+
+        Args:
+            od_head_outs: Her ölçek için (cls, reg, ctr) içeren liste.
+                          cls: (B, C, H, W), reg: (B, 4, H, W), ctr: (B, 1, H, W)
+
+        Returns:
+            (x1, y1, x2, y2, score, class_idx) demetlerinden oluşan liste.
+        """
         device = od_head_outs[0][0].device
         dets = []
         for cls, reg, ctr in od_head_outs:
@@ -157,40 +195,55 @@ class PosHead(nn.Module):
         return xyz
     
 class SpiMultiModel(nn.Module):
-    def __init__(self, temporal=True, hidden=32, num_classes=4, decode_cfg=None):
+    def __init__(self, hidden=64, num_classes=4, decode_cfg=None, od=True, pos=True, stem_type="focus"):
         super().__init__()
-        self.backbone = Backbone(base_channels=hidden // 2)
+        self.backbone = Backbone(base_channels=hidden // 2, stem_type=stem_type)
         self.neck = Neck(ch3=hidden // 2, ch4=hidden, ch5=hidden * 2, hidden=hidden)
-        self.od_head = OdHead(hidden=hidden, num_classes=num_classes)
-        self.pos_head = PosHead(hidden=hidden)
-        self.temporal = temporal
-        if temporal:
+        if od:
+            self.od_head = OdHead(hidden=hidden, num_classes=num_classes)
+        if pos:
+            self.pos_head = PosHead(hidden=hidden)
             self.tneck = TLayerNeck(dim=hidden)
-            self.prev = None
-        self._decoder = DetectDecoder(**(decode_cfg or {})) if decode_cfg else None
+        self.prev = None
+        if od and decode_cfg:
+            self._decoder = DetectDecoder(**decode_cfg)
+        self.has_od = od
+        self.has_pos = pos
 
-    def forward(self, x):
+    def _shared(self, x):
         c3, c4, c5 = self.backbone(x)
-        p3, n4, n5 = self.neck(c3, c4, c5)
-        if self.temporal and self.prev is not None:
-            prev_detached = tuple(t.detach() for t in self.prev)
-            p3, n4, n5 = self.tneck(prev_detached, (p3, n4, n5))
-        if self.temporal:
-            self.prev = (p3, n4, n5)
-        det = self.od_head(p3, n4, n5)
-        pos = self.pos_head(p3, n4, n5)
-        return det, pos
+        return self.neck(c3, c4, c5)
 
-    def forward_pair(self, x_t, x_t1):
-        c3_t, c4_t, c5_t = self.backbone(x_t)
-        p3_t, n4_t, n5_t = self.neck(c3_t, c4_t, c5_t)
-        c3, c4, c5 = self.backbone(x_t1)
-        p3, n4, n5 = self.neck(c3, c4, c5)
-        if self.tneck is not None:
-            p3, n4, n5 = self.tneck((p3_t, n4_t, n5_t), (p3, n4, n5))
-        det = self.od_head(p3, n4, n5)
-        pos = self.pos_head(p3, n4, n5)
+    def forward_od(self, x):
+        neck_out = self._shared(x)
+        return self.od_head(*neck_out)
+
+    def forward_pos(self, x, prev=None):
+        neck_out = self._shared(x)
+        if prev is not None:
+            temporal_out = self.tneck(prev, neck_out)
+        else:
+            temporal_out = neck_out
+        self.prev = neck_out
+        return self.pos_head(*temporal_out)
+
+    def forward(self, x, prev=None):
+        neck_out = self._shared(x)
+
+        # pos_head varsa temporal durumu hesapla
+        if self.has_pos:
+            if prev is not None:
+                temporal_out = self.tneck(prev, neck_out)
+            else:
+                temporal_out = neck_out
+            self.prev = neck_out
+            pos = self.pos_head(*temporal_out)
+        else:
+            pos = None
+
+        det = self.od_head(*neck_out) if self.has_od else None
+
         return det, pos
 
     def decode(self, det_outs):
-        return self._decoder.decode(det_outs) if self._decoder else []
+        return self._decoder.decode(det_outs) if hasattr(self, "_decoder") else []

@@ -172,28 +172,26 @@ class SpiLoss(nn.Module):
         self.pos_criterion = PosCriterion()
 
     def forward(self, det_outs, pos_out, gt_boxes, gt_labels, gt_pos):
-        # detection kaybi her durumda hesaplanir
-        det_loss_dict = self.det_criterion(det_outs, gt_boxes, gt_labels)
-        
-        # mod det_only ise translation kaybi eklenmez
-        if self.mode == "det_only":
-            pos_loss = torch.tensor(0.0, device=det_outs[0][0].device)
-            total_loss = det_loss_dict["loss"]
-            
-            return {
-                "loss": total_loss,
-                "det_loss": det_loss_dict["loss"],
-                "cls_loss": det_loss_dict["cls_loss"],
-                "reg_loss": det_loss_dict["reg_loss"],
-                "ctr_loss": det_loss_dict["ctr_loss"],
-                "pos_loss": pos_loss,
-            }
-        
-        # multi_task modunda her iki kayip da toplanir
-        pos_loss_dict = self.pos_criterion(pos_out, gt_pos)
-        pos_loss = pos_loss_dict["loss"]
+        device = (
+            det_outs[0][0].device if det_outs is not None
+            else pos_out.device
+        )
+        zero = torch.tensor(0.0, device=device)
+
+        # Detection kaybi
+        if det_outs is not None:
+            det_loss_dict = self.det_criterion(det_outs, gt_boxes, gt_labels)
+        else:
+            det_loss_dict = {"loss": zero, "cls_loss": zero, "reg_loss": zero, "ctr_loss": zero}
+
+        # Pos kaybi
+        if self.mode != "det_only" and pos_out is not None:
+            pos_loss = self.pos_criterion(pos_out, gt_pos)["loss"]
+        else:
+            pos_loss = zero
+
         total_loss = det_loss_dict["loss"] + self.lambda_pos * pos_loss
-        
+
         return {
             "loss": total_loss,
             "det_loss": det_loss_dict["loss"],

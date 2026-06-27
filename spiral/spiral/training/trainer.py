@@ -13,6 +13,8 @@ from .reporting import SpiEpochMetric, SpiTrainingHistory, SpiReporting
 from .base import SpiMultiModel
 from spiral.utils import get_timestamp
 
+BASE_WEIGTS_DIR = Path(__file__).parent / "weights"
+
 @dataclass
 class SpiTrainModules:
     """
@@ -24,34 +26,77 @@ class SpiTrainModules:
     scaler: GradScaler
     mode: str = "multi_task" # det_only veya multi_task
 
-    def to_state_dict(self) -> Dict[str, Any]:
-        model_state = self.model.state_dict()
-        
-        # _orig_mod. ekini temizle
-        cleaned_model_state = {}
-        for k, v in model_state.items():
-            if k.startswith('_orig_mod.'):
-                cleaned_model_state[k.replace('_orig_mod.', '', 1)] = v
-            else:
-                cleaned_model_state[k] = v
+    def get_split_state_dicts(self) -> Dict[str, Any]:
+        """
+        Model agirliklarini ve egitim durumunu ayri parcalar halinde dondurur.
+        has_od/has_pos flag'lerine gore sadece var olan headlerin state_dict'i alinir.
+        """
+        shared_state = {
+            "backbone": self.model.backbone.state_dict(),
+            "neck": self.model.neck.state_dict()
+        }
 
-        return {
-            "model_state_dict": cleaned_model_state,
+        # od_head sadece has_od=True ise vardir
+        odbranch_state = {
+            "od_head": self.model.od_head.state_dict() if self.model.has_od else None
+        }
+
+        # pos_head ve tneck sadece has_pos=True ise vardir
+        posbranch_state = {
+            "pos_head": self.model.pos_head.state_dict() if self.model.has_pos else None,
+            "tneck": self.model.tneck.state_dict() if self.model.has_pos else None
+        }
+
+        trainer_state = {
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict() if self.scheduler else None,
             "scaler_state_dict": self.scaler.state_dict() if self.scaler else None,
             "mode": self.mode
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]):
-        self.model.load_state_dict(state_dict["model_state_dict"])
-        self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-        if self.scheduler and state_dict.get("scheduler_state_dict"):
-            self.scheduler.load_state_dict(state_dict["scheduler_state_dict"])
-        if self.scaler and state_dict.get("scaler_state_dict"):
-            self.scaler.load_state_dict(state_dict["scaler_state_dict"])
-        if "mode" in state_dict:
-            self.mode = state_dict["mode"]
+        return {
+            "shared": shared_state,
+            "odbranch": odbranch_state,
+            "posbranch": posbranch_state,
+            "trainer": trainer_state
+        }
+
+    def load_split_state_dicts(
+        self, 
+        shared_dict: Dict[str, Any], 
+        odbranch_dict: Dict[str, Any], 
+        posbranch_dict: Dict[str, Any], 
+        trainer_dict: Dict[str, Any]
+    ):
+        """
+        Ayri yuklenen parcaları ilgili modullere geri yukler
+        """
+        if shared_dict:
+            self.model.backbone.load_state_dict(shared_dict["backbone"])
+            self.model.neck.load_state_dict(shared_dict["neck"])
+
+        # Sadece model has_od=True ise od_head yukle
+        if odbranch_dict and odbranch_dict.get("od_head") is not None and self.model.has_od:
+            self.model.od_head.load_state_dict(odbranch_dict["od_head"])
+
+        # Sadece model has_pos=True ise pos_head ve tneck yukle
+        if posbranch_dict and self.model.has_pos:
+            if posbranch_dict.get("pos_head") is not None:
+                self.model.pos_head.load_state_dict(posbranch_dict["pos_head"])
+            if posbranch_dict.get("tneck") is not None:
+                self.model.tneck.load_state_dict(posbranch_dict["tneck"])
+
+        if trainer_dict:
+            try:
+                self.optimizer.load_state_dict(trainer_dict["optimizer_state_dict"])
+            except ValueError:
+                logging.warning("Optimizer state dict uyumsuz (model mimarisi degismis olabilir). Optimizer sifirdan baslatiliyor.")
+            if self.scheduler and trainer_dict.get("scheduler_state_dict"):
+                self.scheduler.load_state_dict(trainer_dict["scheduler_state_dict"])
+            if self.scaler and trainer_dict.get("scaler_state_dict"):
+                self.scaler.load_state_dict(trainer_dict["scaler_state_dict"])
+            if "mode" in trainer_dict:
+                self.mode = trainer_dict["mode"]
         logging.info("Modul durumlari basariyla yuklendi.")
 
 class SpiTrainer:
@@ -79,7 +124,7 @@ class SpiTrainer:
 
         # save_dir verilmezse weights altında timestamp klasörü oluştur
         if save_dir is None:
-            self.save_dir = Path("weights") / f"model_{get_timestamp()}"
+            self.save_dir = BASE_WEIGTS_DIR / f"model_{get_timestamp()}"
         else:
             self.save_dir = Path(save_dir)
 
@@ -105,17 +150,19 @@ class SpiTrainer:
 
                 self.history.add(epoch, train_metric, val_metric)
 
-                # Bilgileri logla
-                logging.info(f"Train -> {train_metric}")
-                logging.info(f"Val   -> {val_metric}")
+                # Epoch özeti (kısa, detaylı özet sonda _print_summary'de gösterilir)
+                logging.info(
+                    f"Epoch {epoch:02d} sonucu | "
+                    f"Train: {train_metric.loss:.4f}  Val: {val_metric.loss:.4f}"
+                )
 
                 # En iyi model kontrolu
                 val_loss = val_metric.loss
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                     self.patience_counter = 0
-                    self._save_checkpoint("best.pth")
-                    logging.info(f"En iyi model kaydedildi. Val Loss: {val_loss:.4f}")
+                    self._save_checkpoint("best")
+                    logging.info(f"En iyi model parcalari kaydedildi (best_*.pth). Val Loss: {val_loss:.4f}")
                 else:
                     self.patience_counter += 1
                     logging.info(f"Gelisim yok. Patience Counter: {self.patience_counter}/{self.patience}")
@@ -125,7 +172,7 @@ class SpiTrainer:
                     self.modules.scheduler.step()
 
                 # Son model kontrolu
-                self._save_checkpoint("last.pth")
+                self._save_checkpoint("last")
 
                 # Grafikleri ve metrikleri guncelle
                 SpiReporting.plot_training_history(self.history, str(self.save_dir / "history_plot.png"))
@@ -151,8 +198,8 @@ class SpiTrainer:
             # Raporlari guncelle ve son check'leri kaydet
             SpiReporting.plot_training_history(self.history, str(self.save_dir / "history_plot.png"))
             SpiReporting.save_metrics_to_json(self.history, str(self.save_dir / "metrics.json"))
-            self._save_checkpoint("last.pth")
-            logging.info("Son durum last.pth olarak kaydedildi.")
+            self._save_checkpoint("last")
+            logging.info("Son durum son model parcalari olarak kaydedildi (last_*.pth).")
             
         finally:
             # Egitim sonu metrik raporunu terminale bas
@@ -160,23 +207,44 @@ class SpiTrainer:
 
     def load_checkpoint(self, checkpoint_path: str):
         """
-        Kaydedilmis model checkpoint durumlarini geri yukler (Resume)
+        Kaydedilmis model checkpoint durumlarini parcali yukler
         """
-        checkpoint_path = Path(checkpoint_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Checkpoint dosyasi bulunamadi: {checkpoint_path}")
+        path = Path(checkpoint_path)
+        if path.is_dir():
+            folder = path
+            prefix = "last"
+        else:
+            folder = path.parent
+            # "last_shared.pth" veya "best_trainer_state.pth" durumundan prefix ayikla
+            prefix = path.name.split("_")[0]
 
-        state = torch.load(str(checkpoint_path), map_location=self.device)
-        self.modules.load_state_dict(state)
+        shared_path = folder / f"{prefix}_shared.pth"
+        odbranch_path = folder / f"{prefix}_odbranch.pth"
+        posbranch_path = folder / f"{prefix}_posbranch.pth"
+        trainer_path = folder / f"{prefix}_trainer_state.pth"
 
-        if "best_val_loss" in state:
-            self.best_val_loss = state["best_val_loss"]
-        if "history" in state:
-            self.history = state["history"]
-        if "patience_counter" in state:
-            self.patience_counter = state["patience_counter"]
+        # Dosyalarin varligini kontrol et
+        if not shared_path.exists() or not odbranch_path.exists() or not posbranch_path.exists() or not trainer_path.exists():
+            raise FileNotFoundError(f"Checkpoint parcalari eksik. Klasor: {folder}, Prefix: {prefix}")
 
-        logging.info(f"Checkpoint basariyla yuklendi: {checkpoint_path}. Kalinan Epoch: {len(self.history.epochs)}")
+        shared_dict = torch.load(str(shared_path), map_location=self.device)
+        odbranch_dict = torch.load(str(odbranch_path), map_location=self.device)
+        posbranch_dict = torch.load(str(posbranch_path), map_location=self.device)
+
+        # SpiTrainingHistory ve SpiEpochMetric özel sınıflar olduğu için safe globals'a eklenmesi gerekiyor
+        with torch.serialization.safe_globals([SpiTrainingHistory, SpiEpochMetric]):
+            trainer_dict = torch.load(str(trainer_path), map_location=self.device)
+
+        self.modules.load_split_state_dicts(shared_dict, odbranch_dict, posbranch_dict, trainer_dict)
+
+        if "best_val_loss" in trainer_dict:
+            self.best_val_loss = trainer_dict["best_val_loss"]
+        if "history" in trainer_dict:
+            self.history = trainer_dict["history"]
+        if "patience_counter" in trainer_dict:
+            self.patience_counter = trainer_dict["patience_counter"]
+
+        logging.info(f"Checkpoint basariyla yuklendi. Kalinan Epoch: {len(self.history.epochs)}")
 
     def _train_epoch(self) -> SpiEpochMetric:
         self.modules.model.train()
@@ -330,16 +398,26 @@ class SpiTrainer:
 
         return images, translations, gt_boxes, gt_labels
 
-    def _save_checkpoint(self, filename: str):
-        save_path = self.save_dir / filename
+    def _save_checkpoint(self, prefix: str):
         try:
-            state = self.modules.to_state_dict()
-            state["best_val_loss"] = self.best_val_loss
-            state["history"] = self.history
-            state["patience_counter"] = self.patience_counter
-            torch.save(state, str(save_path))
+            split_states = self.modules.get_split_state_dicts()
+            
+            # Shared: backbone + neck
+            torch.save(split_states["shared"], str(self.save_dir / f"{prefix}_shared.pth"))
+            # Odbranch: od_head
+            torch.save(split_states["odbranch"], str(self.save_dir / f"{prefix}_odbranch.pth"))
+            # Posbranch: tneck + pos_head
+            torch.save(split_states["posbranch"], str(self.save_dir / f"{prefix}_posbranch.pth"))
+
+            # Trainer durumlarini da ekle
+            trainer_state = split_states["trainer"]
+            trainer_state["best_val_loss"] = self.best_val_loss
+            trainer_state["history"] = self.history
+            trainer_state["patience_counter"] = self.patience_counter
+            torch.save(trainer_state, str(self.save_dir / f"{prefix}_trainer_state.pth"))
+
         except Exception as e:
-            logging.error(f"Checkpoint kaydedilemedi ({filename}): {e}")
+            logging.error(f"Checkpoint kaydedilemedi ({prefix}): {e}")
 
     def _print_summary(self):
         if not self.history.epochs:

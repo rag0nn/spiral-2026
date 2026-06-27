@@ -13,53 +13,48 @@ from spiral.training.loss import SpiLoss
 from spiral.training.trainer import SpiTrainModules, SpiTrainer
 from spiral.utils import setup_logging
 
-def run_training_example(mode="multi_task", epochs=5):
+def run_od_training_example(epochs=3):
     """
-    Sifirdan model egitimini baslatan ornek fonksiyon
+    Sadece Object Detection (Nesne Tespiti) egitimi yapan ornek fonksiyon.
+    Sadece od_head + shared (backbone + neck) olusturulur, pos_head/tneck hic baslatilmaz.
     """
     setup_logging(level=logging.INFO, force=True)
-    logging.info(f"Sifirdan egitim baslatiliyor. Mod: {mode}")
+    logging.info("Sadece Object Detection egitimi baslatiliyor...")
 
-    # Veri modülü kurulumu
     datamodule = SpiDataModule(
-        datapacks=[
-            Registery.ot25_1,
-            Registery.ot25_2
-        ],
+        datapacks=[Registery.ot25_1, 
+                #    Registery.ot25_2,
+                   
+                   ],
         train_ratio=0.8,
-        batch_size=2,
+        batch_size=16,
         train_transform=SpiTransforms.default_training,
         val_transform=SpiTransforms.default_inference
     )
 
-    # Cihaz secimi
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Model kurulumu (varsayilan hidden=64)
-    temporal_flag = True if mode == "multi_task" else False
-    model = SpiMultiModel(temporal=temporal_flag, num_classes=4)
+    # od=True, pos=False -> pos_head ve tneck hic olusturulmaz
+    # stem_type="focus" -> FocusStem ile 512x512 girdi 128x128'e indirilir
+    model = SpiMultiModel(num_classes=4, od=True, pos=False, stem_type="focus")
     model.to(device)
 
-    # Loss kurulumu
-    loss_fn = SpiLoss(num_classes=4, mode=mode, lambda_pos=1.0)
-
-    # Optimizer ve Scheduler
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=10, T_mult=1, eta_min=1e-6
     )
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
-    # Modul sarmalayicisi
+    loss_fn = SpiLoss(num_classes=4, mode="det_only", lambda_pos=1.0)
+
     modules = SpiTrainModules(
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
         scaler=scaler,
-        mode=mode
+        mode="det_only"
     )
 
-    # Trainer kurulumu (save_dir=None verildigi icin weights/model_timestamp klasorune kaydeder)
     trainer = SpiTrainer(
         modules=modules,
         train_loader=datamodule.train_loader,
@@ -71,22 +66,19 @@ def run_training_example(mode="multi_task", epochs=5):
         total_epochs=epochs
     )
 
-    # Egitimi baslat (CTRL+C ile kesilebilir)
     trainer.start()
 
-def resume_training_example(checkpoint_path: str, epochs=10):
+
+def run_pos_training_example(epochs=3):
     """
-    Kaydedilmis bir checkpoint dosyasini (.pth) yukleyip egitime devam eden fonksiyon
+    Sadece Pose/Translation (Konum Tahmini) egitimi yapan ornek fonksiyon.
+    Sadece pos_head + tneck + shared (backbone + neck) olusturulur, od_head hic baslatilmaz.
     """
     setup_logging(level=logging.INFO, force=True)
-    logging.info(f"Egitime kalinan yerden devam ediliyor. Checkpoint: {checkpoint_path}")
+    logging.info("Sadece Pose/Translation egitimi baslatiliyor...")
 
-    # Veri modülü kurulumu
     datamodule = SpiDataModule(
-        datapacks=[
-            Registery.ot25_1,
-            # Registery.ot25_2
-        ],
+        datapacks=[Registery.ot25_1, Registery.ot25_2],
         train_ratio=0.8,
         batch_size=2,
         train_transform=SpiTransforms.default_training,
@@ -95,8 +87,60 @@ def resume_training_example(checkpoint_path: str, epochs=10):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Modeli gecici olarak varsayilan baslat (checkpoint yuklenecek)
-    model = SpiMultiModel(temporal=True, num_classes=4)
+    # od=False, pos=True -> od_head hic olusturulmaz, tneck + pos_head aktif
+    # stem_type="focus" -> FocusStem ile 512x512 girdi 128x128'e indirilir
+    model = SpiMultiModel(num_classes=4, od=False, pos=True, stem_type="focus")
+    model.to(device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=10, T_mult=1, eta_min=1e-6
+    )
+    scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+
+    loss_fn = SpiLoss(num_classes=4, mode="multi_task", lambda_pos=1.0)
+
+    modules = SpiTrainModules(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        scaler=scaler,
+        mode="multi_task"
+    )
+
+    trainer = SpiTrainer(
+        modules=modules,
+        train_loader=datamodule.train_loader,
+        val_loader=datamodule.val_loader,
+        loss_fn=loss_fn,
+        device=device,
+        save_dir=None,
+        patience=5,
+        total_epochs=epochs
+    )
+
+    trainer.start()
+
+
+def resume_training_example(checkpoint_path: str, epochs=10):
+    """
+    Kaydedilmis parcali checkpoint durumlarini yukleyip egitime devam eden fonksiyon
+    """
+    setup_logging(level=logging.INFO, force=True)
+    logging.info(f"Egitime kalinan yerden devam ediliyor. Checkpoint: {checkpoint_path}")
+
+    datamodule = SpiDataModule(
+        datapacks=[Registery.ot25_1],
+        train_ratio=0.8,
+        batch_size=16,
+        train_transform=SpiTransforms.default_training,
+        val_transform=SpiTransforms.default_inference
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Resume: varsayilan olarak iki head de aktif ve focus stem kullanilir
+    model = SpiMultiModel(num_classes=4, od=True, pos=False, stem_type="focus")
     model.to(device)
 
     loss_fn = SpiLoss(num_classes=4, mode="multi_task", lambda_pos=1.0)
@@ -115,10 +159,9 @@ def resume_training_example(checkpoint_path: str, epochs=10):
         mode="multi_task"
     )
 
-    # Mevcut checkpoint'in bulundugu klasorde kaydetmeye devam etsin
+    # Checkpoint klasorunu kurtarip egitime oradan devam etmesini sagliyoruz
     save_dir = str(Path(checkpoint_path).parent)
 
-    # Trainer kurulumu
     trainer = SpiTrainer(
         modules=modules,
         train_loader=datamodule.train_loader,
@@ -130,15 +173,21 @@ def resume_training_example(checkpoint_path: str, epochs=10):
         total_epochs=epochs
     )
 
-    # Checkpoint durumunu yukle
+    # Parcali checkpoint yukleyici cagrisi
     trainer.load_checkpoint(checkpoint_path)
 
-    # Egitime devam et
     trainer.start()
 
 if __name__ == "__main__":
-    # Test amacli sifirdan egitim calistirmak icin:
-    run_training_example(mode="det_only", epochs=2)
+    # Test amacli OD egitimi calistirmak icin:
+    # run_od_training_example(epochs=1)
 
-    # Eger durdurulmus bir egitimi devam ettirmek istiyorsaniz:
-    # resume_training_example(checkpoint_path="weights/model_20260627_123456/last.pth", epochs=10)
+    # Test amacli Pose egitimi calistirmak icin:
+    # run_pos_training_example(epochs=2)
+
+    # Egitimi resume etmek icin (herhangi bir parcanin path'ini veya klasorunu vermeniz yeterlidir):
+    # resume_training_example(checkpoint_path="weights/model_20260627_123456/last_trainer_state.pth", epochs=10)
+    
+    # ==============================
+    # run_od_training_example(epochs=1)
+    resume_training_example(checkpoint_path="/home/enes/Desktop/spiral_ws/spiral/spiral/training/weights/model_20260627_173118/last_trainer_state.pth", epochs=2)

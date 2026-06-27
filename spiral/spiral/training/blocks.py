@@ -2,6 +2,48 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+
+class FocusStem(nn.Module):
+    """
+    Space-to-Depth (YOLOv5 Focus) katmani.
+    512x512x3 girdiyi 128x128xC ciktiya donusturur (4x downsampling, bilgi kaybi yok).
+    - 1. Adim: PixelUnshuffle ile 512x512x3 -> 128x128x48 (uzamsal bilgiyi kanala tasir)
+    - 2. Adim: Tek bir Conv ile 48 -> out_channels kanal boyutuna indirir
+    Tek bir buyuk Conv'a kiyasla FLOP tasarrufu saglar.
+    """
+    def __init__(self, in_channels=3, out_channels=32, downscale=4):
+        super().__init__()
+        # PixelUnshuffle: H,W -> H/d, W/d ve kanallar d^2 kat artar
+        self.unshuffle = nn.PixelUnshuffle(downscale_factor=downscale)
+        shuffled_channels = in_channels * (downscale ** 2)
+        self.conv = Conv(shuffled_channels, out_channels, k=1)
+
+    def forward(self, x):
+        return self.conv(self.unshuffle(x))
+
+
+class DeepStem(nn.Module):
+    """
+    Ardisik hafif 3x3 evrişimlerle erken downsampling yapan Deep Stem katmani.
+    512x512x3 -> 128x128xC (4x downsampling, iki adimda s=2 ile)
+    Buyuk kernel tek evrişimden daha iyi gradient akisi ve regularization saglar.
+    """
+    def __init__(self, in_channels=3, out_channels=32):
+        super().__init__()
+        mid = out_channels // 2
+        self.stem = nn.Sequential(
+            # 512x512x3 -> 256x256xmid
+            Conv(in_channels, mid, k=3, s=2),
+            # 256x256xmid -> 256x256xmid (receptive field genislet)
+            Conv(mid, mid, k=3, s=1),
+            # 256x256xmid -> 128x128xout
+            Conv(mid, out_channels, k=3, s=2),
+        )
+
+    def forward(self, x):
+        return self.stem(x)
+
+
 class SeparableConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3):
         super().__init__()

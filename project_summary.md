@@ -20,7 +20,7 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
 
 3. **SpiDataLoader Sınıfı (`dataloader.py`):**
    - **Sıralı Veri Bölme (Sequential Split):** Veriyi karıştırmadan, verilen `train_ratio` oranına göre böler. Örneğin `train_ratio=0.8` ise ilk %80'lik dilim eğitim (train), kalan %20'lik dilim doğrulama (validation) veri kümesi olarak ayrılır.
-   - **Karıştırmasız Yükleme (No Shuffling):** Eğitim de dahil olmak üzere hiçbir durumda karıştırma (shuffle) yapılmaz; `shuffle=False` olarak sabitlenmiştir.
+   - **Karıştırmasız Yükleme (No Shuffling):** Eğitim de dahil olmak üzere hiçbir durumda karıştırma (shuffle) yapılmaz; `shuffle=False` as sabitlenmiştir.
    - **Güvenli Harmanlama (Safe Collation):** Farklı görsellerde değişken sayıda nesne (sınır kutusu) bulunabileceği için özel bir `collate_fn` implemente edilmiştir. Görseller `(B, C, H, W)` tensor formatına ve translasyonlar `(B, 3)` tensor formatına dönüştürülüp birleştirilirken, nesne listesi güvenli şekilde list yapısında tutulur.
    - **Loader Erişim Kolaylığı (Alias):** Kullanıcının tercihine göre hem `.train_loader` / `.val_loader` hem de `.trainloader` / `.valloader` üzerinden yüklere erişim sağlanmıştır.
 
@@ -40,17 +40,25 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
    - **SpiReporting:** Eğitim sürecinin son durumunu ve kayıplarını görsel grafiklere dönüştürerek `history_plot.png` ve `metrics.json` dosyası olarak diske kaydeder.
 
 7. **Eğitici Modülü (`trainer.py`):**
-   - **SpiTrainModules:** Model, optimizer, scheduler, grad_scaler ve eğitim modunu (`mode`) sarmalar; state_dict kaydetme ve yükleme işlemlerini yönetir.
+   - **SpiTrainModules:** Model, optimizer, scheduler, grad_scaler ve eğitim modunu (`mode`) sarmalar; parçalı kaydetme ve geri yükleme işlemlerini yönetir.
    - **SpiTrainer:** Eğitim döngüsünü kontrol eden ana sınıftır.
-     - **Timestamp Kayıt Yolu:** Modelleri `weights/model_YYYYMMDD_HHMMSS` klasörü altında `last.pth` ve `best.pth` adlarıyla kaydeder.
+     - **Parçalı Model Kaydetme:** Modeli tek parça halinde kaydetmek yerine, esnek ayrı ayrı eğitim senaryolarını desteklemek için şu parçalara bölerek kaydeder:
+       - `shared.pth`: Backbone + Neck parametreleri.
+       - `odbranch.pth`: Odhead parametreleri.
+       - `posbranch.pth`: Tneck + Poshead parametreleri.
+       - `trainer_state.pth`: Optimizer, scheduler, scaler ve trainer durumu (history, patience vb.).
+       Bu dosyalar hem `best_` hem de `last_` önekiyle kaydedilir.
+     - **Otomatik Parçalı Yükleme:** `load_checkpoint` metoduna herhangi bir parçanın `.pth` yolu veya klasör yolu verildiğinde, ilgili öneğe ait 4 parçayı da tespit edip otomatik olarak geri yükler.
      - **KeyboardInterrupt (CTRL+C) Desteği:** Eğitim sırasında CTRL+C yapıldığında eğitimi güvenli bir şekilde keser, son validasyon adımını koşturur, mevcut ağırlıkları ve raporları kaydedip eğitim özetini terminale basar.
-     - **Resume Desteği:** `load_checkpoint` metodu ile kaldığı epoch'tan, kaldığı en iyi validation loss değerinden ve optimizer/scheduler durumlarından eğitime devam edebilir.
      - `new` sekans bayrağı geldiğinde `model.prev = None` atamasıyla modelin temporal cross-attention durumunu sıfırlar.
      - `det_only` modunda modelin `temporal` özelliğini kapatır ve veri artırımından tam verim alınmasını sağlar.
      - Erken durdurma (early stopping) ve en iyi modeli minimum validation loss değerine göre kaydetme işlevlerine sahiptir.
 
 8. **Örnek Eğitim Betiği (`train_example.py`):**
-   - `example/train_example.py` dosyası ile hem sıfırdan eğitimi başlatan `run_training_example` fonksiyonu hem de kaldığı yerden devam eden `resume_training_example` fonksiyonu örneklenmiştir.
+   - `example/train_example.py` dosyası güncellenerek:
+     - `run_od_training_example`: Sadece nesne tespiti (`od_head` ve ortak katmanlar) dondurma işlemi ile eğitilir, `pos_head` dondurulur.
+     - `run_pos_training_example`: Sadece translasyon/konum tahmini (`pos_head`, `tneck` ve ortak katmanlar) dondurma işlemi ile eğitilir, `od_head` dondurulur.
+     - `resume_training_example`: Parçalı model resume işlemlerinin nasıl yapılacağını gösterir.
 
 ## Bağlantılar Şeması (Chart)
 
