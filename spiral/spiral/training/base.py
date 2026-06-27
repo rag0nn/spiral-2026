@@ -141,7 +141,6 @@ class DetectDecoder:
                         ))
         return dets
 
-
 class PosHead(nn.Module):
     def __init__(self, hidden=128, n_layers=2):
         super().__init__()
@@ -156,7 +155,7 @@ class PosHead(nn.Module):
         ], dim=1))
         return xyz
     
-class SpiMulti(nn.Module):
+class SpiMultiModel(nn.Module):
     def __init__(self, temporal=True, hidden=128, num_classes=4, decode_cfg=None):
         super().__init__()
         self.backbone = Backbone()

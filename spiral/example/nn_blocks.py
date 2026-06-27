@@ -1,6 +1,6 @@
-from spiral.struct.nn.blocks import *
-from spiral.struct.nn.base import *
-from spiral.struct.nn.trainer import DetCriterion, PosCriterion, train_step
+from spiral.training.blocks import *
+from spiral.training.base import *
+from spiral.training.trainer import DetCriterion, PosCriterion, train_step
 from spiral.utils import setup_logging
 
 import torch
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     #     logging.info(f"Scale {i}: cls={cls.shape} reg={reg.shape} ctr={ctr.shape}")
 
     logging.info("\n=== SpiMulti (full pipeline) ===")
-    model = SpiMulti(temporal=False, num_classes=4)
+    model = SpiMultiModel(temporal=False, num_classes=4)
     inp = torch.randn(1, 3, 512, 512)
     det, pos = model(inp)
     for i, (cls, reg, ctr) in enumerate(det):
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         logging.info(f"First: {boxes[0]}")
 
     logging.info("\n=== Training (single-frame) ===")
-    model = SpiMulti(temporal=False, num_classes=4)
+    model = SpiMultiModel(temporal=False, num_classes=4)
     crit_det = DetCriterion(num_classes=4)
     crit_pos = PosCriterion()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         logging.info(f"  {k}: {v.item():.4f}")
 
     logging.info("\n=== Training (temporal pair) ===")
-    model = SpiMulti(temporal=True, num_classes=4)
+    model = SpiMultiModel(temporal=True, num_classes=4)
     crit_det = DetCriterion(num_classes=4)
     crit_pos = PosCriterion()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4)

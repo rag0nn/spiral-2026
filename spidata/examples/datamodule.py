@@ -1,11 +1,18 @@
 from spidata.data.registery import Registery
 from spidata.struct.datamodule import SpiDataModule
+from spidata.tools.transformations import SpiTransforms
 
 # Birden fazla veri paketi (sekans verisi)
 datamodule = SpiDataModule(
-    datapacks=[Registery.ot25_1, Registery.ot25_1],  # birden fazla sekans
+    datapacks=[
+        Registery.ot25_1, 
+        Registery.ot25_2,
+        Registery.ot25_3, 
+        Registery.ot25_4,
+        ],  # birden fazla sekans
     train_ratio=0.8,
-    batch_size=8
+    batch_size=8,
+    train_transform=SpiTransforms.default_inference
 )
 
 print(f"Toplam train batch: {len(datamodule.trainloader)}")
@@ -21,4 +28,7 @@ for batch in datamodule.trainloader:
     objects      = batch["objects"]      # liste
 
     # ... model adımı buraya ...
+    print(images.shape)
+    print(translations.shape)
+    print(len(objects))
     break
