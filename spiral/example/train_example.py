@@ -85,7 +85,7 @@ def resume_training_example(checkpoint_path: str, epochs=10):
     datamodule = SpiDataModule(
         datapacks=[
             Registery.ot25_1,
-            Registery.ot25_2
+            # Registery.ot25_2
         ],
         train_ratio=0.8,
         batch_size=2,
