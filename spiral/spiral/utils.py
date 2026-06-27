@@ -137,12 +137,15 @@ def get_timestamp()->str:
 
 def setup_logging(
     level=logging.INFO,
-    log_path: str | Path | None = None
+    log_path: str | Path | None = None,
+    force: bool = False
     ):
     root = logging.getLogger()
 
     # tekrar eklenmesini engelle
-    if root.handlers:
+    if force:
+        root.handlers.clear()
+    elif root.handlers:
         return root
 
     root.setLevel(level)

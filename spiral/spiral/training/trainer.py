@@ -1,242 +1,365 @@
-from .blocks import *
+import os
 import torch
-from torch import nn
-import torch.nn.functional as F
+import logging
+import numpy as np
+from pathlib import Path
+from tqdm import tqdm
+from torch.amp import autocast, GradScaler
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 
-"""
-Veriye ulaşma şekli
+from .loss import SpiLoss
+from .reporting import SpiEpochMetric, SpiTrainingHistory, SpiReporting
+from .base import SpiMultiModel
+from spiral.utils import get_timestamp
 
-from spidata.data.registery import Registery
-from spidata.struct.datamodule import SpiDataModule
-from spidata.tools.transformations import SpiTransforms
+@dataclass
+class SpiTrainModules:
+    """
+    Model, Optimizer, Scheduler, Scaler ve egitim modunu sarmalayan veri sinifi
+    """
+    model: SpiMultiModel
+    optimizer: torch.optim.Optimizer
+    scheduler: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+    scaler: GradScaler
+    mode: str = "multi_task" # det_only veya multi_task
 
-# Birden fazla veri paketi (sekans verisi)
-datamodule = SpiDataModule(
-    datapacks=[
-        Registery.ot25_1, 
-        Registery.ot25_2,
-        Registery.ot25_3, 
-        Registery.ot25_4,
-        ],  # birden fazla sekans
-    train_ratio=0.8,
-    batch_size=8,
-    train_transform=SpiTransforms.default_training
-)
+    def to_state_dict(self) -> Dict[str, Any]:
+        model_state = self.model.state_dict()
+        
+        # _orig_mod. ekini temizle
+        cleaned_model_state = {}
+        for k, v in model_state.items():
+            if k.startswith('_orig_mod.'):
+                cleaned_model_state[k.replace('_orig_mod.', '', 1)] = v
+            else:
+                cleaned_model_state[k] = v
 
-print(f"Toplam train batch: {len(datamodule.trainloader)}")
-print(f"Toplam val batch  : {len(datamodule.valloader)}")
-
-# Train döngüsü — new=True yeni bir sekansın başladığını gösterir
-for batch in datamodule.trainloader:
-    if batch["new"]:
-        print("Yeni sekans başladı, state sıfırlanabilir.")
-
-    images       = batch["image"]        # (B, 3, 512, 512)
-    translations = batch["translations"] # (B, 3)
-    objects      = batch["objects"]      # liste
-
-    # ... model adımı buraya ...
-    break
-
-"""
-
-
-
-class DetCriterion(nn.Module):
-    def __init__(self, num_classes=4, alpha=0.25, gamma=2.0):
-        super().__init__()
-        self.num_classes = num_classes
-        self.alpha = alpha
-        self.gamma = gamma
-
-    @staticmethod
-    def _make_grid(H, W, device):
-        ys, xs = torch.meshgrid(
-            torch.arange(H, device=device),
-            torch.arange(W, device=device),
-            indexing="ij",
-        )
-        return (xs + 0.5) / W, (ys + 0.5) / H
-
-    @staticmethod
-    def _giou(pred, target):
-        x1 = torch.min(pred[:, 0], target[:, 0])
-        y1 = torch.min(pred[:, 1], target[:, 1])
-        x2 = torch.max(pred[:, 2], target[:, 2])
-        y2 = torch.max(pred[:, 3], target[:, 3])
-
-        a_pred = (pred[:, 2] - pred[:, 0]).clamp(min=0) * (pred[:, 3] - pred[:, 1]).clamp(min=0)
-        a_tgt = (target[:, 2] - target[:, 0]).clamp(min=0) * (target[:, 3] - target[:, 1]).clamp(min=0)
-
-        inter = (torch.min(pred[:, 2], target[:, 2]) - torch.max(pred[:, 0], target[:, 0])).clamp(min=0) * \
-                (torch.min(pred[:, 3], target[:, 3]) - torch.max(pred[:, 1], target[:, 1])).clamp(min=0)
-        union = a_pred + a_tgt - inter
-        iou = inter / (union + 1e-7)
-        area_c = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
-        giou = iou - (area_c - union) / (area_c + 1e-7)
-        return 1 - giou
-
-    def forward(self, det_outs, gt_boxes, gt_labels):
-        device = det_outs[0][0].device
-        cls_loss_sum = torch.tensor(0.0, device=device)
-        reg_loss_sum = torch.tensor(0.0, device=device)
-        ctr_loss_sum = torch.tensor(0.0, device=device)
-
-        for b_idx in range(det_outs[0][0].shape[0]):
-            gt = gt_boxes[b_idx]
-            lbl = gt_labels[b_idx]
-            num_gts = gt.shape[0]
-
-            for cls, reg, ctr in det_outs:
-                _, C, H, W = cls.shape
-                cx, cy = self._make_grid(H, W, device)
-                cx_f, cy_f = cx.flatten(), cy.flatten()
-                HW = H * W
-
-                cls_pred = cls[b_idx].flatten(1).permute(1, 0)
-                reg_pred = reg[b_idx].flatten(1).permute(1, 0)
-                ctr_pred = ctr[b_idx].flatten(1).permute(1, 0)
-
-                if num_gts == 0:
-                    loss = F.binary_cross_entropy_with_logits(
-                        cls_pred, torch.zeros_like(cls_pred), reduction='mean'
-                    )
-                    cls_loss_sum = cls_loss_sum + loss
-                    continue
-
-                l = cx_f[None] - gt[:, 0:1]
-                t = cy_f[None] - gt[:, 1:2]
-                r = gt[:, 2:3] - cx_f[None]
-                b = gt[:, 3:4] - cy_f[None]
-
-                inside = (l > 0) & (t > 0) & (r > 0) & (b > 0)
-
-                gt_areas = (gt[:, 2] - gt[:, 0]) * (gt[:, 3] - gt[:, 1])
-                best_gt = torch.full((HW,), -1, device=device, dtype=torch.long)
-                best_area = torch.full((HW,), float('inf'), device=device)
-
-                for gt_idx in range(num_gts):
-                    pos = inside[gt_idx]
-                    smaller = pos & (gt_areas[gt_idx] < best_area)
-                    best_gt[smaller] = gt_idx
-                    best_area[smaller] = gt_areas[gt_idx]
-
-                pos_mask = best_gt >= 0
-                num_pos = pos_mask.sum()
-
-                cls_target = torch.zeros(HW, self.num_classes, device=device)
-                reg_target = torch.zeros(HW, 4, device=device)
-                ctr_target = torch.zeros(HW, device=device)
-
-                if num_pos > 0:
-                    pos_idx = torch.where(pos_mask)[0]
-                    pos_gt = best_gt[pos_idx]
-
-                    l_pos = l[pos_gt, pos_idx]
-                    t_pos = t[pos_gt, pos_idx]
-                    r_pos = r[pos_gt, pos_idx]
-                    b_pos = b[pos_gt, pos_idx]
-
-                    reg_target[pos_idx] = torch.stack([l_pos, t_pos, r_pos, b_pos], dim=1)
-                    ctr_target[pos_idx] = torch.sqrt(
-                        (torch.min(l_pos, r_pos) / (torch.max(l_pos, r_pos) + 1e-7)) *
-                        (torch.min(t_pos, b_pos) / (torch.max(t_pos, b_pos) + 1e-7))
-                    )
-                    cls_target[pos_idx] = 0
-                    cls_target[pos_idx, lbl[pos_gt]] = 1.0
-
-                cls_loss = F.binary_cross_entropy_with_logits(cls_pred, cls_target, reduction='none')
-                p = torch.sigmoid(cls_pred)
-                p_t = p * cls_target + (1 - p) * (1 - cls_target)
-                focal_weight = (1 - p_t) ** self.gamma
-                if self.alpha >= 0:
-                    alpha_t = self.alpha * cls_target + (1 - self.alpha) * (1 - cls_target)
-                    focal_weight = focal_weight * alpha_t
-                cls_loss = (cls_loss * focal_weight).sum() / (HW * self.num_classes)
-                cls_loss_sum = cls_loss_sum + cls_loss
-
-                if num_pos > 0:
-                    pred_ltrb = reg_pred[pos_idx]
-                    pred_x1y1x2y2 = torch.stack([
-                        cx_f[pos_idx] - pred_ltrb[:, 0],
-                        cy_f[pos_idx] - pred_ltrb[:, 1],
-                        cx_f[pos_idx] + pred_ltrb[:, 2],
-                        cy_f[pos_idx] + pred_ltrb[:, 3],
-                    ], dim=1)
-                    tgt_x1y1x2y2 = torch.stack([
-                        cx_f[pos_idx] - reg_target[pos_idx, 0],
-                        cy_f[pos_idx] - reg_target[pos_idx, 1],
-                        cx_f[pos_idx] + reg_target[pos_idx, 2],
-                        cy_f[pos_idx] + reg_target[pos_idx, 3],
-                    ], dim=1)
-                    reg_loss = self._giou(pred_x1y1x2y2, tgt_x1y1x2y2).sum() / num_pos
-                    reg_loss_sum = reg_loss_sum + reg_loss
-
-                    ctr_loss = F.binary_cross_entropy_with_logits(
-                        ctr_pred[pos_idx, 0], ctr_target[pos_idx], reduction='mean'
-                    )
-                    ctr_loss_sum = ctr_loss_sum + ctr_loss
-
-        total = cls_loss_sum + reg_loss_sum + ctr_loss_sum
         return {
-            "loss": total,
-            "cls_loss": cls_loss_sum,
-            "reg_loss": reg_loss_sum,
-            "ctr_loss": ctr_loss_sum,
+            "model_state_dict": cleaned_model_state,
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict() if self.scheduler else None,
+            "scaler_state_dict": self.scaler.state_dict() if self.scaler else None,
+            "mode": self.mode
         }
 
+    def load_state_dict(self, state_dict: Dict[str, Any]):
+        self.model.load_state_dict(state_dict["model_state_dict"])
+        self.optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+        if self.scheduler and state_dict.get("scheduler_state_dict"):
+            self.scheduler.load_state_dict(state_dict["scheduler_state_dict"])
+        if self.scaler and state_dict.get("scaler_state_dict"):
+            self.scaler.load_state_dict(state_dict["scaler_state_dict"])
+        if "mode" in state_dict:
+            self.mode = state_dict["mode"]
+        logging.info("Modul durumlari basariyla yuklendi.")
 
-class PosCriterion(nn.Module):
-    def __init__(self, loss_type="mse"):
-        super().__init__()
-        self.loss_type = loss_type
+class SpiTrainer:
+    """
+    SpiMultiModel egitimini koordine eden ana egitici sinif
+    """
+    def __init__(
+        self,
+        modules: SpiTrainModules,
+        train_loader,
+        val_loader,
+        loss_fn: SpiLoss,
+        device: torch.device,
+        save_dir: Optional[str] = None,
+        patience: int = 15,
+        total_epochs: int = 50
+    ):
+        self.modules = modules
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.loss_fn = loss_fn
+        self.device = device
+        self.patience = patience
+        self.total_epochs = total_epochs
 
-    def forward(self, pred, target):
-        loss = F.mse_loss(pred, target, reduction="mean")
-        return {"loss": loss, "pos_loss": loss}
+        # save_dir verilmezse weights altında timestamp klasörü oluştur
+        if save_dir is None:
+            self.save_dir = Path("weights") / f"model_{get_timestamp()}"
+        else:
+            self.save_dir = Path(save_dir)
 
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.history = SpiTrainingHistory()
+        self.best_val_loss = float("inf")
+        self.patience_counter = 0
 
-def train_step(model, batch, crit_det, crit_pos, opt=None, temporal=False):
-    if temporal:
-        x_t, x_t1, gt_boxes, gt_labels, gt_pos = batch
-        det, pos = model.forward_pair(x_t, x_t1)
-    else:
-        x, gt_boxes, gt_labels, gt_pos = batch
-        det, pos = model(x)
+    def start(self):
+        logging.info(f"Egitim basliyor... Toplam Epoch: {self.total_epochs}, Cihaz: {self.device}")
+        logging.info(f"Egitim Modu: {self.modules.mode}")
+        logging.info(f"Model Kayit Klasoru: {self.save_dir}")
 
-    loss_det = crit_det(det, gt_boxes, gt_labels)
-    loss_pos = crit_pos(pos, gt_pos)
+        start_epoch = len(self.history.epochs) + 1
 
-    total = loss_det["loss"] + loss_pos["loss"]
-    losses = {
-        "loss": total,
-        "det_loss": loss_det["loss"],
-        "cls_loss": loss_det["cls_loss"],
-        "reg_loss": loss_det["reg_loss"],
-        "ctr_loss": loss_det["ctr_loss"],
-        "pos_loss": loss_pos["pos_loss"],
-    }
+        try:
+            for epoch in range(start_epoch, self.total_epochs + 1):
+                logging.info(f"\nEpoch {epoch}/{self.total_epochs}")
+                
+                # Epoch egitimi ve dogrulamasi
+                train_metric = self._train_epoch()
+                val_metric = self._val_epoch()
 
-    if opt is not None:
-        opt.zero_grad()
-        total.backward()
-        opt.step()
+                self.history.add(epoch, train_metric, val_metric)
 
-    return losses
+                # Bilgileri logla
+                logging.info(f"Train -> {train_metric}")
+                logging.info(f"Val   -> {val_metric}")
 
-# from spiral.struct.nn.trainer import DetCriterion, PosCriterion, train_step
+                # En iyi model kontrolu
+                val_loss = val_metric.loss
+                if val_loss < self.best_val_loss:
+                    self.best_val_loss = val_loss
+                    self.patience_counter = 0
+                    self._save_checkpoint("best.pth")
+                    logging.info(f"En iyi model kaydedildi. Val Loss: {val_loss:.4f}")
+                else:
+                    self.patience_counter += 1
+                    logging.info(f"Gelisim yok. Patience Counter: {self.patience_counter}/{self.patience}")
 
-# model = SpiMulti(temporal=True, num_classes=4)
-# crit_det = DetCriterion(num_classes=4, strides=(1, 2, 4))
-# crit_pos = PosCriterion()
-# opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+                # Scheduler adimi
+                if self.modules.scheduler is not None:
+                    self.modules.scheduler.step()
 
-# # Single-frame
-# batch = (x, gt_boxes, gt_labels, gt_pos, img_size)
-# losses = train_step(model, batch, crit_det, crit_pos, opt, temporal=False)
+                # Son model kontrolu
+                self._save_checkpoint("last.pth")
 
-# # Temporal pair
-# batch = (x_t, x_t1, gt_boxes, gt_labels, gt_pos, img_size)
-# losses = train_step(model, batch, crit_det, crit_pos, opt, temporal=True)
+                # Grafikleri ve metrikleri guncelle
+                SpiReporting.plot_training_history(self.history, str(self.save_dir / "history_plot.png"))
+                SpiReporting.save_metrics_to_json(self.history, str(self.save_dir / "metrics.json"))
 
-# # losses = {loss, det_loss, cls_loss, reg_loss, ctr_loss, pos_loss}
+                # Early stopping kontrolu
+                if self.patience_counter >= self.patience:
+                    logging.info("Early stopping tetiklendi. Egitim sonlandirildi.")
+                    break
+
+                # GPU bellek temizligi
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        except KeyboardInterrupt:
+            logging.info("\n[INTERRUPT] Egitim kullanici tarafindan CTRL+C ile durduruldu!")
+            logging.info("Son durum degerlendiriliyor, son validasyon adimi calistiriliyor...")
+            
+            # Son validasyon
+            val_metric = self._val_epoch()
+            logging.info(f"Son Validasyon Sonucu -> {val_metric}")
+            
+            # Raporlari guncelle ve son check'leri kaydet
+            SpiReporting.plot_training_history(self.history, str(self.save_dir / "history_plot.png"))
+            SpiReporting.save_metrics_to_json(self.history, str(self.save_dir / "metrics.json"))
+            self._save_checkpoint("last.pth")
+            logging.info("Son durum last.pth olarak kaydedildi.")
+            
+        finally:
+            # Egitim sonu metrik raporunu terminale bas
+            self._print_summary()
+
+    def load_checkpoint(self, checkpoint_path: str):
+        """
+        Kaydedilmis model checkpoint durumlarini geri yukler (Resume)
+        """
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint dosyasi bulunamadi: {checkpoint_path}")
+
+        state = torch.load(str(checkpoint_path), map_location=self.device)
+        self.modules.load_state_dict(state)
+
+        if "best_val_loss" in state:
+            self.best_val_loss = state["best_val_loss"]
+        if "history" in state:
+            self.history = state["history"]
+        if "patience_counter" in state:
+            self.patience_counter = state["patience_counter"]
+
+        logging.info(f"Checkpoint basariyla yuklendi: {checkpoint_path}. Kalinan Epoch: {len(self.history.epochs)}")
+
+    def _train_epoch(self) -> SpiEpochMetric:
+        self.modules.model.train()
+        
+        # Mod det_only ise temporal durumunu kapali tut
+        if self.modules.mode == "det_only":
+            self.modules.model.temporal = False
+            self.modules.model.prev = None
+        else:
+            self.modules.model.temporal = True
+
+        running_loss = 0.0
+        running_det = 0.0
+        running_cls = 0.0
+        running_reg = 0.0
+        running_ctr = 0.0
+        running_pos = 0.0
+        total_samples = 0
+
+        pbar = tqdm(self.train_loader, desc="Egitim", leave=False)
+        for batch in pbar:
+            images, translations, gt_boxes, gt_labels = self._process_batch(batch)
+            batch_size = images.size(0)
+            total_samples += batch_size
+
+            # Optimizer gradyan sıfırlama
+            self.modules.optimizer.zero_grad(set_to_none=True)
+
+            # Autocast ile egitim adimi
+            use_amp = self.device.type == "cuda"
+            with autocast(device_type=self.device.type, enabled=use_amp):
+                det_outs, pos_out = self.modules.model(images)
+                
+                loss_dict = self.loss_fn(
+                    det_outs, 
+                    pos_out, 
+                    gt_boxes, 
+                    gt_labels, 
+                    translations
+                )
+                total_loss = loss_dict["loss"]
+
+            # Geri yayilim ve guncelleme
+            if self.modules.scaler is not None:
+                self.modules.scaler.scale(total_loss).backward()
+                self.modules.scaler.unscale_(self.modules.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.modules.model.parameters(), max_norm=5.0)
+                self.modules.scaler.step(self.modules.optimizer)
+                self.modules.scaler.update()
+            else:
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.modules.model.parameters(), max_norm=5.0)
+                self.modules.optimizer.step()
+
+            # Kayiplari biriktir
+            running_loss += total_loss.item() * batch_size
+            running_det += loss_dict["det_loss"].item() * batch_size
+            running_cls += loss_dict["cls_loss"].item() * batch_size
+            running_reg += loss_dict["reg_loss"].item() * batch_size
+            running_ctr += loss_dict["ctr_loss"].item() * batch_size
+            running_pos += loss_dict["pos_loss"].item() * batch_size
+
+            pbar.set_postfix({"loss": f"{total_loss.item():.4f}"})
+
+        return SpiEpochMetric(
+            loss=running_loss / total_samples,
+            det_loss=running_det / total_samples,
+            cls_loss=running_cls / total_samples,
+            reg_loss=running_reg / total_samples,
+            ctr_loss=running_ctr / total_samples,
+            pos_loss=running_pos / total_samples
+        )
+
+    def _val_epoch(self) -> SpiEpochMetric:
+        self.modules.model.eval()
+        
+        # Mod det_only ise temporal durumunu kapali tut
+        if self.modules.mode == "det_only":
+            self.modules.model.temporal = False
+            self.modules.model.prev = None
+        else:
+            self.modules.model.temporal = True
+
+        running_loss = 0.0
+        running_det = 0.0
+        running_cls = 0.0
+        running_reg = 0.0
+        running_ctr = 0.0
+        running_pos = 0.0
+        total_samples = 0
+
+        use_amp = self.device.type == "cuda"
+        with torch.no_grad():
+            pbar = tqdm(self.val_loader, desc="Dogrulama", leave=False)
+            for batch in pbar:
+                images, translations, gt_boxes, gt_labels = self._process_batch(batch)
+                batch_size = images.size(0)
+                total_samples += batch_size
+
+                with autocast(device_type=self.device.type, enabled=use_amp):
+                    det_outs, pos_out = self.modules.model(images)
+                    
+                    loss_dict = self.loss_fn(
+                        det_outs, 
+                        pos_out, 
+                        gt_boxes, 
+                        gt_labels, 
+                        translations
+                    )
+                    total_loss = loss_dict["loss"]
+
+                running_loss += total_loss.item() * batch_size
+                running_det += loss_dict["det_loss"].item() * batch_size
+                running_cls += loss_dict["cls_loss"].item() * batch_size
+                running_reg += loss_dict["reg_loss"].item() * batch_size
+                running_ctr += loss_dict["ctr_loss"].item() * batch_size
+                running_pos += loss_dict["pos_loss"].item() * batch_size
+
+                pbar.set_postfix({"loss": f"{total_loss.item():.4f}"})
+
+        return SpiEpochMetric(
+            loss=running_loss / total_samples,
+            det_loss=running_det / total_samples,
+            cls_loss=running_cls / total_samples,
+            reg_loss=running_reg / total_samples,
+            ctr_loss=running_ctr / total_samples,
+            pos_loss=running_pos / total_samples
+        )
+
+    def _process_batch(self, batch):
+        images = batch["image"].to(self.device).float() / 255.0
+        translations = batch["translations"].to(self.device)
+
+        # Yeni sekans basladiginda model state sıfırlanır
+        if batch.get("new", False) and self.modules.mode == "multi_task":
+            self.modules.model.prev = None
+
+        # objects listesini modelin kabul ettigi tensor formatina donustur
+        gt_boxes = []
+        gt_labels = []
+        for obj_arr in batch["objects"]:
+            if len(obj_arr) > 0:
+                # obj_arr: [[cls_id, xmin, ymin, xmax, ymax], ...]
+                boxes = torch.from_numpy(obj_arr[:, 1:5].astype(np.float32)).to(self.device)
+                labels = torch.from_numpy(obj_arr[:, 0].astype(np.int64)).to(self.device)
+            else:
+                boxes = torch.zeros((0, 4), dtype=torch.float32, device=self.device)
+                labels = torch.zeros((0,), dtype=torch.int64, device=self.device)
+            gt_boxes.append(boxes)
+            gt_labels.append(labels)
+
+        return images, translations, gt_boxes, gt_labels
+
+    def _save_checkpoint(self, filename: str):
+        save_path = self.save_dir / filename
+        try:
+            state = self.modules.to_state_dict()
+            state["best_val_loss"] = self.best_val_loss
+            state["history"] = self.history
+            state["patience_counter"] = self.patience_counter
+            torch.save(state, str(save_path))
+        except Exception as e:
+            logging.error(f"Checkpoint kaydedilemedi ({filename}): {e}")
+
+    def _print_summary(self):
+        if not self.history.epochs:
+            logging.info("Yazdirilacak egitim gecmisi bulunamadi.")
+            return
+
+        logging.info("\n=== EGITIM OZET RAPORU ===")
+        logging.info(f"Kayit Klasoru: {self.save_dir}")
+        logging.info(f"Toplam Tamamlanan Epoch: {len(self.history.epochs)}")
+
+        # En iyi val loss ve epoch
+        best_epoch_idx = np.argmin([m.loss for m in self.history.val_history])
+        best_epoch = self.history.epochs[best_epoch_idx]
+        best_val = self.history.val_history[best_epoch_idx]
+        logging.info(f"En Iyi Val Loss: {best_val.loss:.4f} (Epoch {best_epoch})")
+
+        logging.info("\nEpoch Detaylari:")
+        for epoch, t_m, v_m in zip(self.history.epochs, self.history.train_history, self.history.val_history):
+            logging.info(
+                f"Epoch {epoch:02d} | "
+                f"Train Loss: {t_m.loss:.4f} (Det: {t_m.det_loss:.4f}, Pos: {t_m.pos_loss:.4f}) | "
+                f"Val Loss: {v_m.loss:.4f} (Det: {v_m.det_loss:.4f}, Pos: {v_m.pos_loss:.4f})"
+            )

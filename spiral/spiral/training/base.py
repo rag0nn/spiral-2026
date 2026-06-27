@@ -5,13 +5,14 @@ from torch import nn
 import torch.nn.functional as F
 
 class Backbone(nn.Module):
-    def __init__(self, c1=3):
+    def __init__(self, c1=3, base_channels=32):
         super().__init__()
-        self.c3 = C3K2(c1, 64)
-        self.down34 = Conv(64, 128, k=3, s=2)
-        self.c4 = C3K2(128, 128)
-        self.down45 = Conv(128, 256, k=3, s=2)
-        self.c5 = C3K2(256, 256)
+        c2 = base_channels
+        self.c3 = C3K2(c1, c2)
+        self.down34 = Conv(c2, c2 * 2, k=3, s=2)
+        self.c4 = C3K2(c2 * 2, c2 * 2)
+        self.down45 = Conv(c2 * 2, c2 * 4, k=3, s=2)
+        self.c5 = C3K2(c2 * 4, c2 * 4)
 
     def forward(self, x):
         c3 = self.c3(x)
@@ -20,7 +21,7 @@ class Backbone(nn.Module):
         return c3, c4, c5
     
 class Neck(nn.Module):
-    def __init__(self, ch3=64, ch4=128, ch5=256, hidden=128):
+    def __init__(self, ch3=32, ch4=64, ch5=128, hidden=64):
         super().__init__()
         self.l3 = nn.Conv2d(ch3, hidden, 1)
         self.l4 = nn.Conv2d(ch4, hidden, 1)
@@ -156,10 +157,10 @@ class PosHead(nn.Module):
         return xyz
     
 class SpiMultiModel(nn.Module):
-    def __init__(self, temporal=True, hidden=128, num_classes=4, decode_cfg=None):
+    def __init__(self, temporal=True, hidden=32, num_classes=4, decode_cfg=None):
         super().__init__()
-        self.backbone = Backbone()
-        self.neck = Neck(hidden=hidden)
+        self.backbone = Backbone(base_channels=hidden // 2)
+        self.neck = Neck(ch3=hidden // 2, ch4=hidden, ch5=hidden * 2, hidden=hidden)
         self.od_head = OdHead(hidden=hidden, num_classes=num_classes)
         self.pos_head = PosHead(hidden=hidden)
         self.temporal = temporal
@@ -172,7 +173,8 @@ class SpiMultiModel(nn.Module):
         c3, c4, c5 = self.backbone(x)
         p3, n4, n5 = self.neck(c3, c4, c5)
         if self.temporal and self.prev is not None:
-            p3, n4, n5 = self.tneck(self.prev, (p3, n4, n5))
+            prev_detached = tuple(t.detach() for t in self.prev)
+            p3, n4, n5 = self.tneck(prev_detached, (p3, n4, n5))
         if self.temporal:
             self.prev = (p3, n4, n5)
         det = self.od_head(p3, n4, n5)

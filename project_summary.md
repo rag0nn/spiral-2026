@@ -1,6 +1,6 @@
 # Proje Özeti
 
-Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan `SpiDataset` sınıfı, buna uygun veri artırım (data augmentation) işlemlerini gerçekleştiren `SpiTransforms` yapısı ve veri yükleyicilerini yöneten `SpiDataLoader` implemente edilmiştir.
+Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan `SpiDataset` sınıfı, buna uygun veri artırım (data augmentation) işlemlerini gerçekleştiren `SpiTransforms` yapısı, veri yükleyicilerini yöneten `SpiDataLoader` ve son olarak `SpiMultiModel` modelinin eğitilmesini sağlayan eğitim modülleri (`loss.py`, `reporting.py`, `trainer.py`) implemente edilmiştir.
 
 ## Yapılan Değişiklikler ve Özellikler
 
@@ -30,26 +30,41 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
    - **`new` Bayrağı:** Her alt loader'ın ilk batch'inde `batch["new"] = True`, diğerlerinde `False` döner. Böylece yeni bir sekansa geçildiğini dışarıdan tespit etmek mümkündür.
    - **Alias Erişim:** `.trainloader` / `.valloader` takma adları ile kolay erişim sağlanmıştır.
 
-5. **Testler (`test_dataset.py`, `test_datamodule.py`):**
-   - `tests/test_dataset.py`: `SpiDataset` ve `SpiDataLoader` yapısı test edilmiştir.
-   - `tests/test_datamodule.py`: `SpiDataModule`'ün iki datapack üzerinde sıralı çalıştığı ve `new=True` bayrağının tam geçiş noktasında (batch 450) üretildiği doğrulanmıştır.
+5. **Kayıp Yönetimi (`loss.py`):**
+   - **DetCriterion:** Modelin nesne tespiti başlığından gelen outputs üzerinde Focal Loss (sınıflandırma), GIoU Loss (bbox regresyonu) ve Centerness Loss hesaplamalarını gerçekleştirir.
+   - **PosCriterion:** Modelin translasyon başlığından gelen outputs üzerinde MSE kaybı hesaplar.
+   - **SpiLoss:** Her iki kaybı yönetir. `det_only` modunda translasyon kaybını sıfırlayarak sadece nesne tespitiyle eğitimi; `multi_task` modunda ise iki kaybın ağırlıklı toplamı ile eğitimi destekler.
+
+6. **Raporlama ve Takip (`reporting.py`):**
+   - **SpiEpochMetric & SpiTrainingHistory:** Eğitim sırasındaki tüm alt kayıpları epoch bazlı takip eden ve saklayan sınıflar.
+   - **SpiReporting:** Eğitim sürecinin son durumunu ve kayıplarını görsel grafiklere dönüştürerek `history_plot.png` ve `metrics.json` dosyası olarak diske kaydeder.
+
+7. **Eğitici Modülü (`trainer.py`):**
+   - **SpiTrainModules:** Model, optimizer, scheduler, grad_scaler ve eğitim modunu (`mode`) sarmalar; state_dict kaydetme ve yükleme işlemlerini yönetir.
+   - **SpiTrainer:** Eğitim döngüsünü kontrol eden ana sınıftır.
+     - **Timestamp Kayıt Yolu:** Modelleri `weights/model_YYYYMMDD_HHMMSS` klasörü altında `last.pth` ve `best.pth` adlarıyla kaydeder.
+     - **KeyboardInterrupt (CTRL+C) Desteği:** Eğitim sırasında CTRL+C yapıldığında eğitimi güvenli bir şekilde keser, son validasyon adımını koşturur, mevcut ağırlıkları ve raporları kaydedip eğitim özetini terminale basar.
+     - **Resume Desteği:** `load_checkpoint` metodu ile kaldığı epoch'tan, kaldığı en iyi validation loss değerinden ve optimizer/scheduler durumlarından eğitime devam edebilir.
+     - `new` sekans bayrağı geldiğinde `model.prev = None` atamasıyla modelin temporal cross-attention durumunu sıfırlar.
+     - `det_only` modunda modelin `temporal` özelliğini kapatır ve veri artırımından tam verim alınmasını sağlar.
+     - Erken durdurma (early stopping) ve en iyi modeli minimum validation loss değerine göre kaydetme işlevlerine sahiptir.
+
+8. **Örnek Eğitim Betiği (`train_example.py`):**
+   - `example/train_example.py` dosyası ile hem sıfırdan eğitimi başlatan `run_training_example` fonksiyonu hem de kaldığı yerden devam eden `resume_training_example` fonksiyonu örneklenmiştir.
 
 ## Bağlantılar Şeması (Chart)
 
-Aşağıdaki şemada veri yükleme, bölme ve dönüşüm akışının bağlantıları gösterilmiştir:
+Aşağıdaki şemada veri yükleme, model, kayıp fonksiyonları ve eğitici arasındaki veri akışı ve bağlantı ilişkileri gösterilmiştir:
 
 ```mermaid
 graph TD
-    test_dataset.py[tests/test_dataset.py] -->|1. Test Girişi| SpiDataLoader[spidata/struct/dataloader.py: SpiDataLoader]
-    SpiDataLoader -->|2. Sıralı Split & Dataset Oluşturma| SpiDataset[spidata/struct/dataset.py: SpiDataset]
-    SpiDataset -->|3. Dönüşüm Uygula| SpiTransforms[spidata/tools/transformations.py: SpiTransforms]
-    SpiTransforms -->|Eğitim Seti| Wrap[SpiTransformsWrapper]
-    SpiTransforms -->|Doğrulama Seti| Inf[SpiInferenceTransform]
-    Wrap -->|Görsel ve Translasyon Güncelleme| OutputTrain[Eğitim Örneği]
-    Inf -->|Sadece Görsel Boyutlandırma| OutputInf[Doğrulama Örneği]
-    SpiDataLoader -->|4. Collate Fn ile Gruplama| Collate[spi_collate_fn]
-    Collate -->|5. trainloader / valloader| Loaders[Alt Loader'lar]
-    Loaders -->|6. SpiSequentialDataLoader ile Sıralı Birleştirme| SeqLoader[SpiSequentialDataLoader]
-    SeqLoader -->|7. batch içinde new=True/False| DataModule[spidata/struct/datamodule.py: SpiDataModule]
-    DataModule -->|.trainloader / .valloader| Consumer[Eğitim Döngüsü]
+    SpiDataModule[spidata/SpiDataModule] -->|batch: image, translations, objects, new| SpiTrainer[training/SpiTrainer]
+    SpiTrainer -->|process_batch| SpiTrainer
+    SpiTrainer -->|forward| SpiMultiModel[training/SpiMultiModel]
+    SpiMultiModel -->|outputs: det, pos| SpiTrainer
+    SpiTrainer -->|computes loss| SpiLoss[training/SpiLoss]
+    SpiLoss -->|uses| DetCriterion[training/DetCriterion]
+    SpiLoss -->|uses| PosCriterion[training/PosCriterion]
+    SpiTrainer -->|accumulates| SpiTrainingHistory[training/SpiTrainingHistory]
+    SpiTrainer -->|plots & saves| SpiReporting[training/SpiReporting]
 ```
