@@ -7,7 +7,7 @@ from ..tools.conversion import XML_to_TXT
 class DataPack:
     frames_path:Path
     xml_labels_path:Path
-    translations_path:Path
+    translations_path:Path | None = None
     txt_labels_path: Path | None = None
             
     def __post_init__(self):

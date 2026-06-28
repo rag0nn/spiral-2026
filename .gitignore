@@ -8,6 +8,7 @@
 *.txt
 *.json
 *.png
+*.jpg
 *.MP4
 *.opencode
 __pycache__

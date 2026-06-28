@@ -50,3 +50,31 @@ def XML_to_TXT(path, dst_folder_path):
                 f.write(f"{class_id} {xmin_n:.6f} {ymin_n:.6f} {xmax_n:.6f} {ymax_n:.6f}\n")
 
     
+def xywhc_to_xyxyc(path: Path, dst: Path):
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+
+    src = Path(path)
+    txt_files = [src] if src.is_file() else list(src.glob("*.txt"))
+
+    for txt_path in txt_files:
+        lines_out = []
+        with open(txt_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                cls_id = parts[0]
+                cx, cy, w, h = map(float, parts[1:5])
+                x1 = cx - w / 2
+                y1 = cy - h / 2
+                x2 = cx + w / 2
+                y2 = cy + h / 2
+                lines_out.append(f"{cls_id} {x1:.6f} {y1:.6f} {x2:.6f} {y2:.6f}\n")
+
+        out_path = dst / txt_path.name
+        with open(out_path, "w") as f:
+            f.writelines(lines_out)
