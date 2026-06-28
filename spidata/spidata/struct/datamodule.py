@@ -23,8 +23,8 @@ class SpiSequentialDataLoader:
 
 class SpiDataModule:
     def __init__(self, datapacks, train_ratio=0.8, batch_size=4, 
-                 num_workers=0, pin_memory=False, filter_missing_translations=True, 
-                 train_transform=None, val_transform=None, collate_fn=None):
+                 num_workers=4, pin_memory=False, filter_missing_translations=True, 
+                 train_transform=None, val_transform=None, collate_fn=None, shuffle=False):
         """
         Birden fazla datapack'i yöneten, her biri için sıralı loader'ları kuran
         ve bu loader'lardan sırayla veri çekilmesini sağlayan veri modülü.
@@ -54,7 +54,9 @@ class SpiDataModule:
                 filter_missing_translations=filter_missing_translations,
                 train_transform=train_transform,
                 val_transform=val_transform,
-                collate_fn=collate_fn
+                collate_fn=collate_fn,
+                tile_size=640,
+                shuffle=shuffle
             )
             self.data_loaders.append(loader)
 

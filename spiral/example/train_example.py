@@ -23,13 +23,15 @@ def run_od_training_example(epochs=3):
 
     datamodule = SpiDataModule(
         datapacks=[Registery.ot25_1, 
-                #    Registery.ot25_2,
-                   
+                   Registery.ot25_2,
+                   Registery.ot25_3,
+                   Registery.ot25_4,
                    ],
         train_ratio=0.8,
-        batch_size=16,
+        batch_size=32,
         train_transform=SpiTransforms.default_training,
-        val_transform=SpiTransforms.default_inference
+        val_transform=SpiTransforms.default_inference,
+        filter_missing_translations=False
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -130,11 +132,18 @@ def resume_training_example(checkpoint_path: str, epochs=10):
     logging.info(f"Egitime kalinan yerden devam ediliyor. Checkpoint: {checkpoint_path}")
 
     datamodule = SpiDataModule(
-        datapacks=[Registery.ot25_1],
+        datapacks=[
+            Registery.ot25_1,
+            # Registery.ot25_2,
+            # Registery.ot25_3,
+            # Registery.ot25_4,      
+            ],
         train_ratio=0.8,
         batch_size=16,
         train_transform=SpiTransforms.default_training,
-        val_transform=SpiTransforms.default_inference
+        val_transform=SpiTransforms.default_inference,
+        filter_missing_translations=False,
+        shuffle=True
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -189,5 +198,5 @@ if __name__ == "__main__":
     # resume_training_example(checkpoint_path="weights/model_20260627_123456/last_trainer_state.pth", epochs=10)
     
     # ==============================
-    # run_od_training_example(epochs=1)
-    resume_training_example(checkpoint_path="/home/enes/Desktop/spiral_ws/spiral/spiral/training/weights/model_20260627_173118/last_trainer_state.pth", epochs=2)
+    # run_od_training_example(epochs=100)
+    resume_training_example(checkpoint_path="/home/enes/Desktop/spiral_ws/spiral/spiral/training/weights/model_20260627_214712/last_trainer_state.pth", epochs=26)

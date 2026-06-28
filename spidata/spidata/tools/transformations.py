@@ -102,7 +102,7 @@ class SpiTransformsWrapper:
         }
 
 class SpiInferenceTransform:
-    def __init__(self, size=(512, 512)):
+    def __init__(self, size=(640,640)):
         """
         Çıkarım (inference) aşamasında sadece görseli boyutlandıran sınıf.
         Diğer değerlere (translasyon, nesneler vb.) kesinlikle dokunulmaz.
@@ -126,18 +126,19 @@ class SpiTransforms:
     # Varsayılan eğitim dönüşümleri
     default_training = SpiTransformsWrapper(
         A.ReplayCompose([
-            A.Resize(height=512, width=512),
+            A.RandomCrop(height=640, width=640),
+            # A.RandomResizedCrop(height=640, width=640, scale=(0.5, 1.0), ratio=(0.8, 1.2), p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.2),
             A.Rotate(limit=30, p=0.5),
             A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), shear=(-10, 10), rotate=(0, 0), p=0.5),
             A.Perspective(scale=(0.05, 0.2), p=0.3),
-            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
-            A.GaussianBlur(blur_limit=(3, 3), sigma_limit=(0.1, 1.0), p=0.5),
+            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.2),
+            A.GaussianBlur(blur_limit=(3, 3), sigma_limit=(0.1, 1.0), p=0.2),
             A.Equalize(p=0.1),
             A.AutoContrast(p=0.1),
         ], bbox_params=_bbox_params)
     )
 
     # Varsayılan çıkarım dönüşümleri
-    default_inference = SpiInferenceTransform((512, 512))
+    default_inference = SpiInferenceTransform((640, 640))

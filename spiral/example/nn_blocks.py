@@ -8,7 +8,7 @@ from spiral.utils import setup_logging
 
 setup_logging(force=True)
 
-INPUT_SHAPE = (1, 3, 512, 512)
+INPUT_SHAPE = (1, 3, 640,640)
 NUM_CLASSES = 4
 WARMUP_RUNS = 5
 MEASURE_RUNS = 20
