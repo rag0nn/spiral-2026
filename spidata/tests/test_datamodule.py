@@ -1,5 +1,5 @@
 import torch
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 from spidata.struct.datamodule import SpiDataModule
 
 def test_spi_datamodule():

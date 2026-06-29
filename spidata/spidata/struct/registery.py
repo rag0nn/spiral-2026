@@ -1,7 +1,7 @@
-from ..struct.pack import DataPack
+from .pack import DataPack
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent / "data"
 
 class Registery:
     

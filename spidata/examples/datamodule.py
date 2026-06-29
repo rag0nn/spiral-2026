@@ -1,4 +1,4 @@
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 from spidata.struct.datamodule import SpiDataModule
 from spidata.tools.transformations import SpiTransforms
 

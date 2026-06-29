@@ -1,4 +1,4 @@
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 import logging
 import pandas as pd
 import cv2
@@ -45,5 +45,5 @@ def general_show():
 def generate_labels():
     data_pack.create_txt_folder_from_xml()
 
-generate_labels()
-general_show()
+# generate_labels()
+# general_show()

@@ -1,5 +1,5 @@
 from spidata.struct.dataset import SpiDataset
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 from spiral.struct.packets import OdObject, Result, SourcePacket, TranslationObject, SearchObject
 from spiral.visualization.visualizer import Visualizer
 import cv2

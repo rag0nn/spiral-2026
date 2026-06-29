@@ -1,6 +1,7 @@
 import time
 import torch
 import torchinfo
+from ultralytics.nn.modules.block import C2fAttn
 import logging
 
 from spiral.training.base import SpiMultiModel, DetectDecoder

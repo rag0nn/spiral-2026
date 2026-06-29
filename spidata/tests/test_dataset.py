@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import numpy as np
 import torch
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 from spidata.struct.dataset import SpiDataset
 from spidata.tools.transformations import SpiTransforms
 from spidata.struct.dataloader import SpiDataLoader

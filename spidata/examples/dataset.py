@@ -1,4 +1,4 @@
-from spidata.data.registery import Registery
+from spidata.struct.registery import Registery
 from spidata.struct.dataset import SpiDataset
 from spidata.tools.transformations import SpiTransforms
 from spidata.tools.visualize import draw_sample
