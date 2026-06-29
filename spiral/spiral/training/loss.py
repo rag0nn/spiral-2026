@@ -67,14 +67,22 @@ class DetCriterion(nn.Module):
                     cls_loss_sum = cls_loss_sum + loss
                     continue
 
-                l = cx_f[None] - gt[:, 0:1]
-                t = cy_f[None] - gt[:, 1:2]
-                r = gt[:, 2:3] - cx_f[None]
-                b = gt[:, 3:4] - cy_f[None]
+                # gt_boxes: [cx, cy, w, h] (center format, normalized)
+                gt_cx = gt[:, 0:1]
+                gt_cy = gt[:, 1:2]
+                gt_w = gt[:, 2:3]
+                gt_h = gt[:, 3:4]
+                half_w = gt_w / 2
+                half_h = gt_h / 2
+
+                l = cx_f[None] - (gt_cx - half_w)
+                t = cy_f[None] - (gt_cy - half_h)
+                r = (gt_cx + half_w) - cx_f[None]
+                b = (gt_cy + half_h) - cy_f[None]
 
                 inside = (l > 0) & (t > 0) & (r > 0) & (b > 0)
 
-                gt_areas = (gt[:, 2] - gt[:, 0]) * (gt[:, 3] - gt[:, 1])
+                gt_areas = gt_w.squeeze(1) * gt_h.squeeze(1)
                 best_gt = torch.full((HW,), -1, device=device, dtype=torch.long)
                 best_area = torch.full((HW,), float('inf'), device=device)
 

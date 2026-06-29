@@ -110,7 +110,7 @@ class DetectDecoder:
     Dönen her detection: (x1, y1, x2, y2, score, class_idx)
     """
 
-    def __init__(self, score_thresh=0.5, nms_iou=0.45, max_det=100, fmt="xyxy"):
+    def __init__(self, score_thresh=0.5, nms_iou=0.45, max_det=100, fmt="xywh"):
         self.score_thresh = score_thresh
         self.nms_iou = nms_iou
         self.max_det = max_det
