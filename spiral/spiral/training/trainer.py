@@ -248,13 +248,10 @@ class SpiTrainer:
 
     def _train_epoch(self) -> SpiEpochMetric:
         self.modules.model.train()
-        
-        # Mod det_only ise temporal durumunu kapali tut
+
+        # Mod det_only ise temporal durumunu sıfırla
         if self.modules.mode == "det_only":
-            self.modules.model.temporal = False
             self.modules.model.prev = None
-        else:
-            self.modules.model.temporal = True
 
         running_loss = 0.0
         running_det = 0.0
@@ -320,13 +317,10 @@ class SpiTrainer:
 
     def _val_epoch(self) -> SpiEpochMetric:
         self.modules.model.eval()
-        
-        # Mod det_only ise temporal durumunu kapali tut
+
+        # Mod det_only ise temporal durumunu sıfırla
         if self.modules.mode == "det_only":
-            self.modules.model.temporal = False
             self.modules.model.prev = None
-        else:
-            self.modules.model.temporal = True
 
         running_loss = 0.0
         running_det = 0.0
@@ -387,7 +381,7 @@ class SpiTrainer:
         gt_labels = []
         for obj_arr in batch["objects"]:
             if len(obj_arr) > 0:
-                # obj_arr: [[cls_id, xmin, ymin, xmax, ymax], ...]
+                # obj_arr: [[cls_id, cx, cy, w, h], ...] (YOLO xywh normalized)
                 boxes = torch.from_numpy(obj_arr[:, 1:5].astype(np.float32)).to(self.device)
                 labels = torch.from_numpy(obj_arr[:, 0].astype(np.int64)).to(self.device)
             else:

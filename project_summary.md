@@ -12,11 +12,11 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
 
 2. **SpiTransforms Yapısı (`transformations.py`):**
    - **Albumentations Entegrasyonu:** Eski torchvision tabanlı dönüşümler yerine bounding box (sınır kutusu) ve translasyon uyumlu **Albumentations** (`ReplayCompose`) kütüphanesine geçiş yapılmıştır.
-   - **SpiTransformsWrapper Sınıfı (Eğitim/Training):** Dönüşüm uygulandığında sadece görseli değil, görselle birlikte sınır kutularını (xyxy normalize) ve 3 boyutlu kamera translasyon değerlerini de güncelleyen bir sarmalayıcı sınıf yazılmıştır.
+    - **SpiTransformsWrapper Sınıfı (Eğitim/Training):** Dönüşüm uygulandığında sadece görseli değil, görselle birlikte sınır kutularını (YOLO xywh normalize) ve 3 boyutlu kamera translasyon değerlerini de güncelleyen bir sarmalayıcı sınıf yazılmıştır.
      - `HorizontalFlip` uygulandığında yatay translasyon ($x$) işareti tersine çevrilir.
      - `VerticalFlip` uygulandığında dikey translasyon ($y$) işareti tersine çevrilir.
      - `Rotate`, `ShiftScaleRotate` veya `Affine` dönüşümleri uygulandığında oluşan rotasyon matrisi (`params['matrix']`) kullanılarak $x$ ve $y$ translasyon vektörleri döndürülür.
-   - **SpiInferenceTransform Sınıfı (Çıkarım/Inference):** Çıkarım sırasında veri kümesine dokunulmasını önlemek amacıyla sadece görüntüyü 512x512 boyutuna getiren özel bir sınıf yazılmıştır. Translasyon değerleri ve nesneler üzerinde hiçbir değişiklik yapılmaz.
+    - **SpiInferenceTransform Sınıfı (Çıkarım/Inference):** Çıkarım sırasında veri kümesine dokunulmasını önlemek amacıyla sadece görüntüyü 640x640 boyutuna getiren özel bir sınıf yazılmıştır. Translasyon değerleri ve nesneler üzerinde hiçbir değişiklik yapılmaz.
 
 3. **SpiDataLoader Sınıfı (`dataloader.py`):**
    - **Sıralı Veri Bölme (Sequential Split):** Veriyi karıştırmadan, verilen `train_ratio` oranına göre böler. Örneğin `train_ratio=0.8` ise ilk %80'lik dilim eğitim (train), kalan %20'lik dilim doğrulama (validation) veri kümesi olarak ayrılır.
@@ -50,8 +50,8 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
        Bu dosyalar hem `best_` hem de `last_` önekiyle kaydedilir.
      - **Otomatik Parçalı Yükleme:** `load_checkpoint` metoduna herhangi bir parçanın `.pth` yolu veya klasör yolu verildiğinde, ilgili öneğe ait 4 parçayı da tespit edip otomatik olarak geri yükler.
      - **KeyboardInterrupt (CTRL+C) Desteği:** Eğitim sırasında CTRL+C yapıldığında eğitimi güvenli bir şekilde keser, son validasyon adımını koşturur, mevcut ağırlıkları ve raporları kaydedip eğitim özetini terminale basar.
-     - `new` sekans bayrağı geldiğinde `model.prev = None` atamasıyla modelin temporal cross-attention durumunu sıfırlar.
-     - `det_only` modunda modelin `temporal` özelliğini kapatır ve veri artırımından tam verim alınmasını sağlar.
+      - `new` sekans bayrağı geldiğinde `model.prev = None` atamasıyla modelin temporal cross-attention durumunu sıfırlar.
+      - `det_only` modunda temporal durumu `model.prev = None` ile sıfırlar; veri artırımından tam verim alınmasını sağlar.
      - Erken durdurma (early stopping) ve en iyi modeli minimum validation loss değerine göre kaydetme işlevlerine sahiptir.
 
 8. **Örnek Eğitim Betiği (`train_example.py`):**
@@ -59,6 +59,24 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
      - `run_od_training_example`: Sadece nesne tespiti (`od_head` ve ortak katmanlar) dondurma işlemi ile eğitilir, `pos_head` dondurulur.
      - `run_pos_training_example`: Sadece translasyon/konum tahmini (`pos_head`, `tneck` ve ortak katmanlar) dondurma işlemi ile eğitilir, `od_head` dondurulur.
      - `resume_training_example`: Parçalı model resume işlemlerinin nasıl yapılacağını gösterir.
+
+9. **Tiling ve Etiket Formatı Düzeltmeleri (`tiling.py`):**
+   - `TileGenerator._crop_objects` artık **YOLO xywh** formatında (cx, cy, w, h) giriş alıp aynı formatında çıkış verir. Önceki sürüm xyxy (köşe) koordinatları varsaydığından, `SpiDataModule` üzerinden yapılan eğitimde tüm nesneler sessizce düşürülüyordu ve model yalnızca background öğreniyordu.
+   - Tile ile kırpma: xywh -> köşelere çevir -> tile ile kırp -> tile koordinatında normalize et -> xywh'ye geri dön.
+
+10. **Trainer Logic Düzeltmeleri (`trainer.py`):**
+    - `model.temporal` ataması kaldırıldı: `SpiMultiModel`'de böyle bir attribute yoktu, atama no-op'tu. Sadece `model.prev = None` (temporal cross-attention durumu sıfırlama) bırakıldı.
+    - `_process_batch` yorumu düzeltildi: `xmin,ymin,xmax,ymax` → `cx,cy,w,h` (YOLO xywh). Kod zaten sütun 1:5'i loss'a olduğu gibi paslıyordu, yalnızca yorum eski kalmıştı.
+
+11. **Test Düzeltmeleri (`test_dataset.py`):**
+    - Görüntü boyutu assert'leri 512x512'den 640x640'a güncellendi; transformlar (`RandomCropOrResize(640)`, `SpiInferenceTransform((640,640))`) zaten 640 üretiyordu, eski testler fail ediyordu.
+
+## Uygulanmayan ama tespit edilen konular (kullanıcı kararı bekliyor)
+
+- **`reg_out` aktivasyonu (`base.py`):** OdHead'in `reg_out` conv'u LTRB mesafelerini aktivasyonsuz üretir. Negatif çıkarsa decoder'da box geometrisi bozulur (`x1 = cx - l`, l<0 ise x1>cx). Eğitimde `clamp(min=0)` hasarı azaltır ama öğrenmeyi zorlaştırır. `F.relu`/`exp` önerilir — ancak mevcut checkpoint ile uyumsuzluk yaratır.
+- **`cls_loss` normalizasyonu (`loss.py`):** `(cls_loss * focal_weight).sum() / (HW * num_classes)` — HW*C çok büyük bir sayıya böldüğünden sınıflama kaybı under-weighted kalır. `num_pos` tabanlı normalizasyon daha standarttır. Eğitim dinamiğini değiştireceğinden kullanıcı deneyip karar vermelidir.
+- **`OdObject.from_xy1xy2_norm` (`packets.py`):** Eski xyxy constructor'ı, hiçbir yerde kullanılmıyor (dead code). Çevresel sınıf metodu olduğundan silinmedi.
+- **Docstring tutarsızlıkları:** `base.py` backbone/stem docstring'leri "512x512" diyor ama gerçek girdi 640; `tools/visualize.py:7` "xyxy" diyor ama veri xywh. Kullanıcı 512 mi 640 mi istediğine karar verip docstring'leri toplu güncelleyebilir.
 
 ## Bağlantılar Şeması (Chart)
 

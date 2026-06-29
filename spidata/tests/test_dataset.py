@@ -48,7 +48,7 @@ def test_spi_dataset():
     print(f"Eğitim Görüntü sekli: {sample_train['image'].shape}")
     print(f"Eğitim Translasyon degeri: {sample_train['translations']}")
     print(f"Eğitim Nesneler: {sample_train['objects']}")
-    assert sample_train['image'].shape == (512, 512, 3), "Eğitim görüntüsü boyutu (512, 512, 3) olmalidir"
+    assert sample_train['image'].shape == (640, 640, 3), "Eğitim görüntüsü boyutu (640, 640, 3) olmalidir"
 
     # 7. Çıkarım (Inference) dönüsümlü SpiDataset nesnesini olustur
     dataset_inference = SpiDataset(
@@ -65,7 +65,7 @@ def test_spi_dataset():
     print(f"Çıkarım Nesneler: {sample_inf['objects']}")
 
     # Görselin boyutu 512x512 olmali, ancak translasyon ve nesneler degismemeli (ham veriyle ayni kalmali)
-    assert sample_inf['image'].shape == (512, 512, 3), "Çıkarım görüntüsü boyutu (512, 512, 3) olmalidir"
+    assert sample_inf['image'].shape == (640, 640, 3), "Çıkarım görüntüsü boyutu (640, 640, 3) olmalidir"
     assert np.allclose(sample_inf['translations'], sample['translations'], equal_nan=True), "Çıkarım translasyonu degismemeliydi!"
     
     # Nesnelerin ayni kaldigini dogrula
@@ -109,13 +109,13 @@ def test_spi_dataloader():
     batch_train = next(iter(dataloader.trainloader))
     print("\n--- Trainloader Batch Örneği ---")
     print(f"Batch Görsel tipi: {type(batch_train['image'])}")
-    print(f"Batch Görsel şekli: {batch_train['image'].shape}")  # (4, 3, 512, 512) olmalı
+    print(f"Batch Görsel şekli: {batch_train['image'].shape}")  # (4, 3, 640, 640) olmalı
     print(f"Batch Translasyon tipi: {type(batch_train['translations'])}")
     print(f"Batch Translasyon şekli: {batch_train['translations'].shape}")  # (4, 3) olmalı
     print(f"Batch Nesneler liste uzunluğu: {len(batch_train['objects'])}")
     
     assert isinstance(batch_train['image'], torch.Tensor), "Batch görseli PyTorch Tensor olmalıdır"
-    assert batch_train['image'].shape == (batch_size, 3, 512, 512), f"Görsel batch boyutu uyuşmuyor: {batch_train['image'].shape}"
+    assert batch_train['image'].shape == (batch_size, 3, 640, 640), f"Görsel batch boyutu uyuşmuyor: {batch_train['image'].shape}"
     assert batch_train['translations'].shape == (batch_size, 3), f"Translasyon batch boyutu uyuşmuyor: {batch_train['translations'].shape}"
     
     # Bir batch okuma testi (valloader)
@@ -125,7 +125,7 @@ def test_spi_dataloader():
     print(f"Val Batch Translasyon şekli: {batch_val['translations'].shape}")
     print(f"Val Batch Nesneler liste uzunluğu: {len(batch_val['objects'])}")
     
-    assert batch_val['image'].shape == (batch_size, 3, 512, 512), "Doğrulama görsel batch boyutu uyuşmuyor!"
+    assert batch_val['image'].shape == (batch_size, 3, 640, 640), "Doğrulama görsel batch boyutu uyuşmuyor!"
     
     print("\nSpiDataLoader testleri başarıyla tamamlandı!")
 

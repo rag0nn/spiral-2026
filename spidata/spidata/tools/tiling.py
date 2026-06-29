@@ -27,12 +27,12 @@ class TileGenerator:
         Parametreler:
             image (np.ndarray): RGB görüntü, shape (H, W, C).
             objects (np.ndarray, opsiyonel): (N, 5) array, her satır
-                (class_id, x1, y1, x2, y2) — normalized [0,1].
+                (class_id, cx, cy, w, h) — YOLO formatında normalized [0,1].
 
         Dönüş:
             tiles_data (list[dict]): Her öğe:
                 - "tile" (np.ndarray): (tile_size, tile_size, C)
-                - "objects" (np.ndarray): Tile'a ait kırpılmış bbox'lar
+                - "objects" (np.ndarray): Tile'a ait kırpılmış bbox'lar (YOLO xywh)
                 - "position" (tuple[int, int]): (x, y) sol-üst köşe
         """
         H, W = image.shape[:2]
@@ -68,7 +68,7 @@ class TileGenerator:
     def _crop_objects(self, objects: np.ndarray, img_w: int, img_h: int,
                       ts: int, tx: int, ty: int) -> np.ndarray:
         """
-        Nesneleri tile bölgesine kırpar.
+        Nesneleri tile bölgesine kırpar (giriş/çıkış YOLO xywh normalized).
         Tile içinde kalmayan bbox'lar atılır, kısmen kalanlar kırpılır.
         """
         if objects is None or len(objects) == 0:
@@ -80,22 +80,27 @@ class TileGenerator:
         clipped = []
         for obj in objects:
             cls_id = int(obj[0])
-            x1, y1, x2, y2 = float(obj[1]), float(obj[2]), float(obj[3]), float(obj[4])
+            cx, cy, w, h = float(obj[1]), float(obj[2]), float(obj[3]), float(obj[4])
 
-            ax1, ay1 = x1 * img_w, y1 * img_h
-            ax2, ay2 = x2 * img_w, y2 * img_h
+            # xywh -> köşelere (piksel)
+            ax1 = (cx - w / 2) * img_w
+            ay1 = (cy - h / 2) * img_h
+            ax2 = (cx + w / 2) * img_w
+            ay2 = (cy + h / 2) * img_h
 
+            # tile ile kırp
             ix1 = max(ax1, tx)
             iy1 = max(ay1, ty)
             ix2 = min(ax2, tx2)
             iy2 = min(ay2, ty2)
 
             if ix2 > ix1 and iy2 > iy1:
-                nx1 = (ix1 - tx) / ts
-                ny1 = (iy1 - ty) / ts
-                nx2 = (ix2 - tx) / ts
-                ny2 = (iy2 - ty) / ts
-                clipped.append((cls_id, nx1, ny1, nx2, ny2))
+                # tile koordinatına normalize et ve xywh'ye geri dön
+                ncx = ((ix1 + ix2) / 2 - tx) / ts
+                ncy = ((iy1 + iy2) / 2 - ty) / ts
+                nw = (ix2 - ix1) / ts
+                nh = (iy2 - iy1) / ts
+                clipped.append((cls_id, ncx, ncy, nw, nh))
 
         if len(clipped) > 0:
             return np.array(clipped, dtype=object)
