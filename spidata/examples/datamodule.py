@@ -23,7 +23,7 @@ for batch in datamodule.trainloader:
     if batch["new"]:
         print("Yeni sekans başladı, state sıfırlanabilir.")
 
-    images       = batch["image"]        # (B, 3, 512, 512)
+    images       = batch["image"]        # (B, 3, 640, 640)
     translations = batch["translations"] # (B, 3)
     objects      = batch["objects"]      # liste
 

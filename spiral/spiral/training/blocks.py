@@ -6,8 +6,8 @@ import torch.nn.functional as F
 class FocusStem(nn.Module):
     """
     Space-to-Depth (YOLOv5 Focus) katmani.
-    512x512x3 girdiyi 128x128xC ciktiya donusturur (4x downsampling, bilgi kaybi yok).
-    - 1. Adim: PixelUnshuffle ile 512x512x3 -> 128x128x48 (uzamsal bilgiyi kanala tasir)
+    640x640x3 girdiyi 160x160xC ciktiya donusturur (4x downsampling, bilgi kaybi yok).
+    - 1. Adim: PixelUnshuffle ile 640x640x3 -> 160x160x48 (uzamsal bilgiyi kanala tasir)
     - 2. Adim: Tek bir Conv ile 48 -> out_channels kanal boyutuna indirir
     Tek bir buyuk Conv'a kiyasla FLOP tasarrufu saglar.
     """
@@ -25,18 +25,18 @@ class FocusStem(nn.Module):
 class DeepStem(nn.Module):
     """
     Ardisik hafif 3x3 evrişimlerle erken downsampling yapan Deep Stem katmani.
-    512x512x3 -> 128x128xC (4x downsampling, iki adimda s=2 ile)
+    640x640x3 -> 160x160xC (4x downsampling, iki adimda s=2 ile)
     Buyuk kernel tek evrişimden daha iyi gradient akisi ve regularization saglar.
     """
     def __init__(self, in_channels=3, out_channels=32):
         super().__init__()
         mid = out_channels // 2
         self.stem = nn.Sequential(
-            # 512x512x3 -> 256x256xmid
+            # 640x640x3 -> 320x320xmid
             Conv(in_channels, mid, k=3, s=2),
-            # 256x256xmid -> 256x256xmid (receptive field genislet)
+            # 320x320xmid -> 320x320xmid (receptive field genislet)
             Conv(mid, mid, k=3, s=1),
-            # 256x256xmid -> 128x128xout
+            # 320x320xmid -> 160x160xout
             Conv(mid, out_channels, k=3, s=2),
         )
 

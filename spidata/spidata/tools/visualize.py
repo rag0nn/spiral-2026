@@ -4,7 +4,7 @@ import numpy as np
 def draw_sample(sample, class_names=None, window_name="sample", show=True):
     """
     Bir sample dict'ini görselleştirir.
-    Görüntü üzerine normalize xyxy sınır kutularını ve class etiketlerini çizer,
+    Görüntü üzerine normalize YOLO xywh sınır kutularını ve class etiketlerini çizer,
     sol üst köşeye translasyon değerlerini yazar.
 
     Parametreler:

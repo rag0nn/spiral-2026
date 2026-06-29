@@ -14,4 +14,6 @@ When adding code, be simple as you can, code could be readable easily
 
 If user orders is affects 2-4 code files, add abstracted chart to report which shows connections between.
 
+Read first (if exist) project_summary.md before any project code and get summary of project, but it may have missing stages so be careful
+
 After done all changes add or change project_summary.md 

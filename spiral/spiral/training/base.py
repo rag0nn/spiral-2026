@@ -8,7 +8,7 @@ class Backbone(nn.Module):
     """
     Erken downsampling icin ayarlanabilir stem blogu (FocusStem veya DeepStem) kullanan backbone.
 
-    512x512x3 girdi, C3K2 bloklarina girmeden once stem ile 128x128 boyutuna indirilir.
+    640x640x3 girdi, C3K2 bloklarina girmeden once stem ile 160x160 boyutuna indirilir.
     Bu sayede erken katmanlardaki FLOP ve bellek tuketimi onemli olcude azalir.
 
     stem_type:
@@ -18,7 +18,7 @@ class Backbone(nn.Module):
     def __init__(self, c1=3, base_channels=32, stem_type="focus"):
         super().__init__()
         c2 = base_channels
-        # Stem: 512x512x3 -> 128x128xc2 (4x downsampling)
+        # Stem: 640x640x3 -> 160x160xc2 (4x downsampling)
         if stem_type == "focus":
             self.stem = FocusStem(in_channels=c1, out_channels=c2, downscale=4)
         elif stem_type == "deep":
@@ -26,7 +26,7 @@ class Backbone(nn.Module):
         else:
             raise ValueError(f"Bilinmeyen stem_type: {stem_type}. 'focus' veya 'deep' kullanin.")
 
-        # C3K2 bloklari artik 128x128 uzerinde calisir (512x512 yerine)
+        # C3K2 bloklari artik 160x160 uzerinde calisir (640x640 yerine)
         self.c3 = C3K2(c2, c2)
         self.down34 = Conv(c2, c2 * 2, k=3, s=2)
         self.c4 = C3K2(c2 * 2, c2 * 2)
@@ -34,7 +34,7 @@ class Backbone(nn.Module):
         self.c5 = C3K2(c2 * 4, c2 * 4)
 
     def forward(self, x):
-        # x: 512x512 -> stem -> 128x128
+        # x: 640x640 -> stem -> 160x160
         s = self.stem(x)
         c3 = self.c3(s)
         c4 = self.c4(self.down34(c3))
@@ -100,7 +100,8 @@ class OdHead(nn.Module):
         outs = []
         for x in [p3, n4, n5]:
             feat = self.stem(x)
-            outs.append((self.cls_out(feat), self.reg_out(feat), self.ctr_out(feat)))
+            # reg_out: LTRB mesafeleri pozitif olmali (box geometrisini bozmamak icin)
+            outs.append((self.cls_out(feat), F.relu(self.reg_out(feat)), self.ctr_out(feat)))
         return outs
 
 class DetectDecoder:

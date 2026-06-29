@@ -123,7 +123,7 @@ class DetCriterion(nn.Module):
                 if self.alpha >= 0:
                     alpha_t = self.alpha * cls_target + (1 - self.alpha) * (1 - cls_target)
                     focal_weight = focal_weight * alpha_t
-                cls_loss = (cls_loss * focal_weight).sum() / (HW * self.num_classes)
+                cls_loss = (cls_loss * focal_weight).sum() / max(num_pos, 1)
                 cls_loss_sum = cls_loss_sum + cls_loss
 
                 if num_pos > 0:

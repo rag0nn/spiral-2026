@@ -62,16 +62,6 @@ class OdObject:
                 f"bottom_right=({self.bottom_right_x}, {self.bottom_right_y}))")
     
     @classmethod
-    def from_xy1xy2_norm(cls, id_, cls_, conf, x1,y1,x2,y2, ls, ms, image_wh):
-        W,H = image_wh
-        abs_x1 = int(W * x1)
-        abs_x2 = int(W * x2)
-        abs_y1 = int(H * y1)
-        abs_y2 = int(H * y2)
-        obj = cls(id_, cls_, conf, ls, ms, abs_x1, abs_y1, abs_x2, abs_y2)
-        return obj
-    
-    @classmethod
     def from_xywh_norm(cls, id_, cls_, conf, cx, cy, w, h, ls, ms, image_wh):
         W, H = image_wh
         abs_w = int(W * w)

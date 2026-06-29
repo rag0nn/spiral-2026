@@ -71,12 +71,19 @@ Bu projede `spidata` modülü altında PyTorch `Dataset` yapısını temel alan 
 11. **Test Düzeltmeleri (`test_dataset.py`):**
     - Görüntü boyutu assert'leri 512x512'den 640x640'a güncellendi; transformlar (`RandomCropOrResize(640)`, `SpiInferenceTransform((640,640))`) zaten 640 üretiyordu, eski testler fail ediyordu.
 
-## Uygulanmayan ama tespit edilen konular (kullanıcı kararı bekliyor)
+12. **OdHead Reg Aktivasyonu (`base.py`):**
+    - `OdHead.reg_out` çıkışına `F.relu` uygulandı. LTRB mesafeleri (left/top/right/bottom) pozitif olmalıdır; aksi halde decoder'da `x1 = cx - l` ile `l < 0` olduğunda `x1 > cx` çıkar ve box geometrisi içe değil dışa açılır. `F.relu` ile pozitiflik garantilenir. `cls_out` ve `ctr_out` üzerinde değişiklik yok (bunlar loss/decoder tarafında sigmoid uygulanıyor).
 
-- **`reg_out` aktivasyonu (`base.py`):** OdHead'in `reg_out` conv'u LTRB mesafelerini aktivasyonsuz üretir. Negatif çıkarsa decoder'da box geometrisi bozulur (`x1 = cx - l`, l<0 ise x1>cx). Eğitimde `clamp(min=0)` hasarı azaltır ama öğrenmeyi zorlaştırır. `F.relu`/`exp` önerilir — ancak mevcut checkpoint ile uyumsuzluk yaratır.
-- **`cls_loss` normalizasyonu (`loss.py`):** `(cls_loss * focal_weight).sum() / (HW * num_classes)` — HW*C çok büyük bir sayıya böldüğünden sınıflama kaybı under-weighted kalır. `num_pos` tabanlı normalizasyon daha standarttır. Eğitim dinamiğini değiştireceğinden kullanıcı deneyip karar vermelidir.
-- **`OdObject.from_xy1xy2_norm` (`packets.py`):** Eski xyxy constructor'ı, hiçbir yerde kullanılmıyor (dead code). Çevresel sınıf metodu olduğundan silinmedi.
-- **Docstring tutarsızlıkları:** `base.py` backbone/stem docstring'leri "512x512" diyor ama gerçek girdi 640; `tools/visualize.py:7` "xyxy" diyor ama veri xywh. Kullanıcı 512 mi 640 mi istediğine karar verip docstring'leri toplu güncelleyebilir.
+13. **cls_loss Normalizasyonu (`loss.py`):**
+    - `DetCriterion`'da focal cls loss normalizasyonu `HW * num_classes` yerine `max(num_pos, 1)` olarak değiştirildi. Önceki ifade tüm uzamsal hücre sayısına böldüğünden sınıflama kaybı under-weighted kalıyordu; `num_pos` tabanlı normalizasyon FCOS/RetinaNet standardıyla uyumlu. `num_pos == 0` (boş GT) durumunda `max(num_pos, 1)` ile NaN oluşumu engellendi.
+
+14. **Dead-Code Temizliği (`packets.py`):**
+    - `OdObject.from_xy1xy2_norm` (eski xyxy constructor'ı) silindi. Etiket formatı YOLO xywh'a geçildiğinden bu metot hiçbir yerde kullanılmıyordu; `from_xywh_norm` tek constructor olarak bırakıldı.
+
+15. **Docstring Güncellemeleri:**
+    - `base.py` Backbone/FocusStem/DeepStem docstring'lerinde "512x512 → 128x128" ifadeleri "640x640 → 160x160" olarak düzeltildi (gerçek girdi boyutu 640).
+    - `tools/visualize.py` docstring'inde "xyxy" → "YOLO xywh" yapıldı.
+    - `examples/datamodule.py` yorumundaki `(B, 3, 512, 512)` → `(B, 3, 640, 640)` düzeltildi.
 
 ## Bağlantılar Şeması (Chart)
 
