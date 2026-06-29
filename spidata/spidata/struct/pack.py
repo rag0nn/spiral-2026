@@ -6,7 +6,7 @@ from ..tools.conversion import XML_to_TXT
 @dataclass
 class DataPack:
     frames_path:Path
-    xml_labels_path:Path
+    xml_labels_path:Path | None = None
     translations_path:Path | None = None
     txt_labels_path: Path | None = None
             

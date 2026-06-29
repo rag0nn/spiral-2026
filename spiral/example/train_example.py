@@ -132,18 +132,13 @@ def resume_training_example(checkpoint_path: str, epochs=10):
     logging.info(f"Egitime kalinan yerden devam ediliyor. Checkpoint: {checkpoint_path}")
 
     datamodule = SpiDataModule(
-        datapacks=[
-            Registery.ot25_1,
-            # Registery.ot25_2,
-            # Registery.ot25_3,
-            # Registery.ot25_4,      
-            ],
+        datapacks=Registery.get_all(),
         train_ratio=0.8,
         batch_size=16,
         train_transform=SpiTransforms.default_training,
         val_transform=SpiTransforms.default_inference,
         filter_missing_translations=False,
-        shuffle=True
+        shuffle=False
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -178,7 +173,7 @@ def resume_training_example(checkpoint_path: str, epochs=10):
         loss_fn=loss_fn,
         device=device,
         save_dir=save_dir,
-        patience=5,
+        patience=8,
         total_epochs=epochs
     )
 
@@ -199,4 +194,4 @@ if __name__ == "__main__":
     
     # ==============================
     # run_od_training_example(epochs=100)
-    resume_training_example(checkpoint_path="/home/enes/Desktop/spiral_ws/spiral/spiral/training/weights/model_20260627_214712/last_trainer_state.pth", epochs=26)
+    resume_training_example(checkpoint_path="/home/enes/Desktop/spiral_ws/spiral/spiral/training/weights/model_20260627_214712/last_trainer_state.pth", epochs=60)

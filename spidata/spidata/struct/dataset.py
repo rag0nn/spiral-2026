@@ -100,11 +100,11 @@ class SpiDataset(Dataset):
                         parts = line.split()
                         if len(parts) == 5:
                             cls_id = int(parts[0])
-                            xmin = float(parts[1])
-                            ymin = float(parts[2])
-                            xmax = float(parts[3])
-                            ymax = float(parts[4])
-                            objects_list.append((cls_id, xmin, ymin, xmax, ymax))
+                            x = float(parts[1])
+                            y = float(parts[2])
+                            w = float(parts[3])
+                            h = float(parts[4])
+                            objects_list.append((cls_id, x, y, w, h))
 
         if len(objects_list) > 0:
             # Liste veya demet yapisini numpy demet dizisine dönüstür

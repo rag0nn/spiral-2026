@@ -71,6 +71,20 @@ class OdObject:
         obj = cls(id_, cls_, conf, ls, ms, abs_x1, abs_y1, abs_x2, abs_y2)
         return obj
     
+    @classmethod
+    def from_xywh_norm(cls, id_, cls_, conf, cx, cy, w, h, ls, ms, image_wh):
+        W, H = image_wh
+        abs_w = int(W * w)
+        abs_h = int(H * h)
+        abs_cx = int(W * cx)
+        abs_cy = int(H * cy)
+        x1 = abs_cx - abs_w // 2
+        y1 = abs_cy - abs_h // 2
+        x2 = abs_cx + abs_w // 2
+        y2 = abs_cy + abs_h // 2
+        obj = cls(id_, cls_, conf, ls, ms, x1, y1, x2, y2)
+        return obj
+    
 @beartype
 class TranslationObject:
     

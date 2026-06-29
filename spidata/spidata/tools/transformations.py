@@ -14,23 +14,11 @@ class SpiTransformsWrapper:
         translations = sample["translations"].copy()
         objects = sample["objects"]
 
-        # Albumentations için etiketleri ve sınır kutularını hazırla
+        # Albumentations için etiketleri ve sınır kutularını hazırla ([cx, cy, w, h] normalized)
         bboxes = []
         class_labels = []
         for obj in objects:
-            # Sınır kutusu koordinatlarını [0, 1] aralığına kırp
-            xmin = max(0.0, min(1.0, float(obj[1])))
-            ymin = max(0.0, min(1.0, float(obj[2])))
-            xmax = max(0.0, min(1.0, float(obj[3])))
-            ymax = max(0.0, min(1.0, float(obj[4])))
-            
-            # xmax > xmin ve ymax > ymin koşulunu sağla
-            if xmax <= xmin:
-                xmax = min(1.0, xmin + 1e-4)
-            if ymax <= ymin:
-                ymax = min(1.0, ymin + 1e-4)
-                
-            bboxes.append([xmin, ymin, xmax, ymax])
+            bboxes.append([float(obj[1]), float(obj[2]), float(obj[3]), float(obj[4])])
             class_labels.append(int(obj[0]))
 
         # Dönüşümleri ReplayCompose ile uygula
@@ -40,15 +28,12 @@ class SpiTransformsWrapper:
         new_bboxes = transformed["bboxes"]
         new_class_labels = transformed["class_labels"]
         
-        # Transse edilmiş nesneleri yeniden oluştur
+        # Dönüştürülmüş nesneleri yeniden oluştur ([cx, cy, w, h] normalized)
         new_objects_list = []
         for i in range(len(new_bboxes)):
             new_objects_list.append((
                 new_class_labels[i],
-                new_bboxes[i][0],
-                new_bboxes[i][1],
-                new_bboxes[i][2],
-                new_bboxes[i][3]
+                new_bboxes[i][0], new_bboxes[i][1], new_bboxes[i][2], new_bboxes[i][3]
             ))
             
         if len(new_objects_list) > 0:
@@ -119,14 +104,31 @@ class SpiInferenceTransform:
             "objects": sample["objects"]
         }
 
+class RandomCropOrResize(A.DualTransform):
+    def __init__(self, size=640, p=1.0):
+        super().__init__(p=p)
+        self.size = size
+
+    def __call__(self, force_apply=False, **data):
+        image = data["image"]
+        h, w = image.shape[:2]
+
+        if h >= self.size and w >= self.size:
+            t = A.RandomCrop(self.size, self.size)
+        else:
+            t = A.Resize(self.size, self.size)
+
+        return t(force_apply=True, **data)
+
 class SpiTransforms:
     # Sınır kutusu ayarları
-    _bbox_params = A.BboxParams(format='albumentations', label_fields=['class_labels'])
+    _bbox_params = A.BboxParams(format='yolo', label_fields=['class_labels'])
 
     # Varsayılan eğitim dönüşümleri
     default_training = SpiTransformsWrapper(
         A.ReplayCompose([
-            A.RandomCrop(height=640, width=640),
+            # A.RandomCrop(height=640, width=640),
+            RandomCropOrResize(640),
             # A.RandomResizedCrop(height=640, width=640, scale=(0.5, 1.0), ratio=(0.8, 1.2), p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.2),

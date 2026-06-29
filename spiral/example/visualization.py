@@ -1,24 +1,30 @@
-from spidata.tools import get_random_sample
+from spidata.struct.dataset import SpiDataset
+from spidata.data.registery import Registery
 from spiral.struct.packets import OdObject, Result, SourcePacket, TranslationObject, SearchObject
 from spiral.visualization.visualizer import Visualizer
 import cv2
 
 visualizer = Visualizer()
 
-image, lines = get_random_sample()
+
+dataset =SpiDataset(
+    datapack=Registery.ot25_3,
+    filter_missing_translations=False,
+    transform=None
+)
+sample= dataset.get_random_sample()
+image = sample["image"]
+objects = sample["objects"]
+
 H,W,_ = image.shape
 objs=  []
 
-for line in lines:
-    parts = line.split(" ")
-    obj = OdObject.from_xy1xy2_norm(
+for lbl,x,y,w,h in objects:
+    obj = OdObject.from_xywh_norm(
         0,
-        int(line[0]),
+        int(lbl),
         0.5,
-        float(parts[1]),
-        float(parts[2]),
-        float(parts[3]),
-        float(parts[4]),
+        x,y,w,h,
         -1,
         0,
         (W,H)

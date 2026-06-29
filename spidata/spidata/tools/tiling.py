@@ -126,3 +126,29 @@ class TileGenerator:
             padded = np.pad(image, ((0, pad_h), (0, pad_w)), mode="constant")
 
         return padded
+
+    def collect(self, images: list[np.ndarray], positions: list[tuple[int, int]]) -> np.ndarray:
+        if len(images) == 0:
+            raise ValueError("No images to collect")
+
+        H, W = 0, 0
+        for img, (x, y) in zip(images, positions):
+            H = max(H, y + img.shape[0])
+            W = max(W, x + img.shape[1])
+
+        dtype = images[0].dtype
+        nch = images[0].shape[2] if images[0].ndim == 3 else 1
+
+        shape = (H, W) if nch == 1 else (H, W, nch)
+        acc = np.zeros(shape, dtype=np.float64)
+        w = np.zeros(shape, dtype=np.float64)
+
+        for img, (x, y) in zip(images, positions):
+            h, w_ = img.shape[0], img.shape[1]
+            acc[y:y+h, x:x+w_] += img.astype(np.float64)
+            w[y:y+h, x:x+w_] += 1.0
+
+        mask = w > 0
+        out = np.divide(acc, w, where=mask, out=np.zeros_like(acc))
+        out = np.clip(out, 0, 255).astype(dtype)
+        return out

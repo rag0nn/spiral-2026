@@ -28,14 +28,18 @@ def draw_sample(sample, class_names=None, window_name="sample", show=True):
     # Sınır kutularını çiz
     for obj in objects:
         cls_id = int(obj[0])
-        xmin = int(float(obj[1]) * w)
-        ymin = int(float(obj[2]) * h)
-        xmax = int(float(obj[3]) * w)
-        ymax = int(float(obj[4]) * h)
+        cx = float(obj[1]) * w
+        cy = float(obj[2]) * h
+        bw = float(obj[3]) * w
+        bh = float(obj[4]) * h
+
+        xmin = int(cx - bw / 2)
+        ymin = int(cy - bh / 2)
+        xmax = int(cx + bw / 2)
+        ymax = int(cy + bh / 2)
 
         color = _class_color(cls_id)
         cv2.rectangle(canvas, (xmin, ymin), (xmax, ymax), color, 2)
-
         label = class_names[cls_id] if class_names and cls_id < len(class_names) else str(cls_id)
         _draw_label(canvas, label, (xmin, ymin), color)
 
